@@ -18,6 +18,11 @@ type GatherArgs = {
   selectedIds?: unknown;
   rangeFrom?: unknown;
   rangeTo?: unknown;
+  // A22 fix: campaign sends take a spread SAMPLE of the filtered set instead of its
+  // highest-volume head. Exports keep sales_volume desc — a CSV is read top-down and is
+  // expected to lead with the biggest producers. Ignored when specific agents were
+  // hand-picked: an explicit selection already decided who goes.
+  randomize?: boolean;
 };
 
 // agent.* + its MLS affiliations (same shape the export columns expect). Ordered by the id
@@ -49,7 +54,8 @@ async function fetchAgentRowsByIds(rawIds: string[]): Promise<Record<string, unk
 }
 
 export async function gatherExportRows(args: GatherArgs): Promise<Record<string, unknown>[]> {
-  const { mode = "agent", source = "courted", selectedIds, rangeFrom, rangeTo, userId = null } = args;
+  const { mode = "agent", source = "courted", selectedIds, rangeFrom, rangeTo, userId = null, randomize = false } = args;
+  const sortBy = randomize ? "random" : "sales_volume";
   const filters = await sanitizeSavedViews(args.filters ?? {}, userId);
   const from = Number(rangeFrom) > 0 ? Number(rangeFrom) : 1;
   const to = Number(rangeTo) > 0 ? Number(rangeTo) : null;
@@ -66,15 +72,18 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
       officeIds = selectedIds as string[];
     } else {
       const { rows } = await pool.query(
-        `select fn_filter_ids('office', $1, $2::jsonb, 'sales_volume', 'desc', $3, $4) as ids`,
-        [source, JSON.stringify(filters), Math.min(limit, EXPORT_MAX_ROWS), offset]
+        `select fn_filter_ids('office', $1, $2::jsonb, $5, 'desc', $3, $4) as ids`,
+        [source, JSON.stringify(filters), Math.min(limit, EXPORT_MAX_ROWS), offset, sortBy]
       );
       officeIds = (rows[0]?.ids ?? []) as string[];
     }
     if (officeIds.length === 0) return [];
-    // Cap total exported agents at EXPORT_MAX_ROWS (an office can hold many agents).
+    // Cap total exported agents at EXPORT_MAX_ROWS (an office can hold many agents). The cap
+    // itself is volume-ordered for exports; for a send it must be sampled too, or the cap
+    // re-introduces exactly the top-producer bias we just removed from the office pick.
     const { rows } = await pool.query(
-      `${AGENT_SELECT} where a.office_id = any($1::uuid[]) order by a.sales_volume desc nulls last limit ${EXPORT_MAX_ROWS}`,
+      `${AGENT_SELECT} where a.office_id = any($1::uuid[])
+        order by ${randomize ? "md5(a.id::text)" : "a.sales_volume desc nulls last"} limit ${EXPORT_MAX_ROWS}`,
       [officeIds]
     );
     return rows as Record<string, unknown>[];
@@ -85,8 +94,8 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
     return fetchAgentRowsByIds(selectedIds as string[]);
   }
   const { rows } = await pool.query(
-    `select fn_filter_ids('agent', $1, $2::jsonb, 'sales_volume', 'desc', $3, $4) as ids`,
-    [source, JSON.stringify(filters), Math.min(limit, EXPORT_MAX_ROWS), offset]
+    `select fn_filter_ids('agent', $1, $2::jsonb, $5, 'desc', $3, $4) as ids`,
+    [source, JSON.stringify(filters), Math.min(limit, EXPORT_MAX_ROWS), offset, sortBy]
   );
   const ids = (rows[0]?.ids ?? []) as string[];
   if (ids.length === 0) return [];

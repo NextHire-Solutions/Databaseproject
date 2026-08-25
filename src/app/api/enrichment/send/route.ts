@@ -42,18 +42,21 @@ export async function POST(req: NextRequest) {
 
   let rows: Record<string, unknown>[] = [];
   try {
-    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: user?.id ?? null });
+    // randomize: campaign sends sample ACROSS the filtered set rather than taking its
+    // highest-volume head (A22 fix). Ignored when specific agents were hand-picked.
+    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: user?.id ?? null, randomize: true });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }
   const agentIds = [...new Set(rows.map((r) => r.id as string).filter(Boolean))];
   if (agentIds.length === 0) return NextResponse.json({ error: "No agents to send." }, { status: 400 });
 
-  // A22: shuffle before queueing. gatherExportRows returns ids ordered by sales_volume desc,
-  // and the worker claims items in insertion order — so without this the highest-producing
-  // agents were all contacted first, in one block at the front of the campaign. Randomising
-  // spreads them across the send window. Which agents go is unchanged (the filter/range/
-  // selection already decided that); only the order they are contacted in changes.
+  // A22: shuffle the queue order. WHICH agents go is decided above — gatherExportRows now
+  // samples across the filtered set instead of returning its highest-volume head, which is
+  // the part that was making every campaign skew to top producers. This shuffle is still
+  // needed on top of it: the worker claims items in insertion order, and a hand-picked
+  // selection arrives in the order the user checked boxes, so without it that order would
+  // decide who gets contacted first.
   for (let i = agentIds.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [agentIds[i], agentIds[j]] = [agentIds[j], agentIds[i]];
