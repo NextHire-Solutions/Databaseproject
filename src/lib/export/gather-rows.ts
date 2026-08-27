@@ -37,20 +37,37 @@ const CHUNK = 5000;
 
 // Fetch full agent rows for a list of ids, in chunks, preserving the id-list order.
 // Ids are deduped first — a repeated id in selectedIds must not emit the agent twice.
-async function fetchAgentRowsByIds(rawIds: string[]): Promise<Record<string, unknown>[]> {
+//
+// A4: when the search is MLS-scoped, the production metrics must come from that MLS's stats,
+// not the all-MLS rollup on agents.* — the filter was applied to the scoped sum, so printing
+// the rollup produced a CSV whose first row broke its own cap ($18.6M under a $10M cap).
+// fn_export_rows applies the same overlay the screen uses; scopedMls null = unchanged behaviour.
+async function fetchAgentRowsByIds(rawIds: string[], scopedMls: string[] | null = null): Promise<Record<string, unknown>[]> {
   const ids = [...new Set(rawIds)];
   const out: Record<string, unknown>[] = [];
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
-    const { rows } = await getPool().query(
-      `${AGENT_SELECT}
-         join unnest($1::uuid[]) with ordinality as u(id, ord) on u.id = a.id
-        order by u.ord`,
-      [chunk]
-    );
-    out.push(...(rows as Record<string, unknown>[]));
+    if (scopedMls?.length) {
+      const { rows } = await getPool().query(`select fn_export_rows($1::uuid[], $2::uuid[]) as j`, [chunk, scopedMls]);
+      out.push(...((rows[0]?.j ?? []) as Record<string, unknown>[]));
+    } else {
+      const { rows } = await getPool().query(
+        `${AGENT_SELECT}
+           join unnest($1::uuid[]) with ordinality as u(id, ord) on u.id = a.id
+          order by u.ord`,
+        [chunk]
+      );
+      out.push(...(rows as Record<string, unknown>[]));
+    }
   }
   return out;
+}
+
+// The A5 coverage gate, resolved once per export so the ids and the rows agree on scope.
+async function scopedMlsFor(filters: Record<string, unknown>): Promise<string[] | null> {
+  const { rows } = await getPool().query(`select fn_scoped_mls($1::jsonb) as m`, [JSON.stringify(filters)]);
+  const m = rows[0]?.m as string[] | null;
+  return m?.length ? m : null;
 }
 
 export async function gatherExportRows(args: GatherArgs): Promise<Record<string, unknown>[]> {
@@ -90,8 +107,11 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
   }
 
   // ---------- AGENT MODE ----------
+  // A4: resolved once and used for BOTH the id order and the row values, so the file can never
+  // be ordered by one column and printed from another.
+  const scopedMls = await scopedMlsFor(filters);
   if (hasSelection) {
-    return fetchAgentRowsByIds(selectedIds as string[]);
+    return fetchAgentRowsByIds(selectedIds as string[], scopedMls);
   }
   const { rows } = await pool.query(
     `select fn_filter_ids('agent', $1, $2::jsonb, $5, 'desc', $3, $4) as ids`,
@@ -99,5 +119,5 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
   );
   const ids = (rows[0]?.ids ?? []) as string[];
   if (ids.length === 0) return [];
-  return fetchAgentRowsByIds(ids);
+  return fetchAgentRowsByIds(ids, scopedMls);
 }

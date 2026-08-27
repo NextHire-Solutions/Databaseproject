@@ -225,9 +225,16 @@ function statByPriority(agent, order, key, canonicalKey) {
 }
 
 // ---------------------------------------------------------------------------
-// Lead mapper — matches the Clay "Create or update lead" columns exactly (July 2026
-// screenshots): 12 custom variables, sent on EVERY lead (empty string when unknown, so
-// the variable always exists on the lead — Clay uses "PUT: replace all fields").
+// Lead mapper — matches the Clay "Create or update lead" columns (July 2026 screenshots):
+// 12 custom variables, sent on EVERY lead (empty string when unknown, so the variable always
+// exists on the lead — Clay uses "PUT: replace all fields").
+//
+// A3 (client request, Aug 2026): the Courted profile link must NOT reach campaigns. The
+// variable is still SENT but always empty, deliberately — sending it blank overwrites the link
+// on the ~30k leads already in Bison as the worker touches them again, which dropping the key
+// entirely would not reliably do. No email copy referenced it (checked across 139 live
+// campaigns: only {FIRST_NAME}, {firstName}, {PHONE NUMBER} and {TOP PRODUCING CITY} appear),
+// so nothing renders differently. Do not "restore Clay parity" by repopulating it.
 // ---------------------------------------------------------------------------
 const money = (v) => (v == null || v === "" ? "" : `$${Math.round(Number(v)).toLocaleString("en-US")}`);
 const num = (v) => (v == null ? "0" : String(v));
@@ -240,7 +247,6 @@ function splitName(full) {
 export function mapAgentToBisonLead(agent, email, mlsCode, order = PRIORITY_ORDERS.courted) {
   const first = agent.first_name || splitName(agent.full_name).first;
   const last = agent.last_name || splitName(agent.full_name).last;
-  const profile = byPriority(agent, order, "profile_url", "__none__") ?? "";
   const vars = [
     ["buy-side", money(agent.buy_side_dollar)],
     ["list-side", money(agent.list_side_dollar)],
@@ -249,7 +255,7 @@ export function mapAgentToBisonLead(agent, email, mlsCode, order = PRIORITY_ORDE
     ["sales volume", money(agent.sales_volume)],
     ["estimated gci", money(agent.approx_gci)],
     ["closed rentals", num(agent.closed_rentals)],
-    ["courted profile", profile],
+    ["courted profile", ""], // A3: never send the Courted link; blank overwrites existing leads
     ["mls affiliation", mlsCode ?? ""],
     ["top producing city", cityState(byPriority(agent, order, "city", "most_transacted_city"), agent.transacted_state)],
     ["average sales price", money(agent.avg_sale_price)],

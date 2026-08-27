@@ -476,8 +476,12 @@ export function LocationPopover({ value, onChange, officeMode = false, mlsIds = 
           })
         )}
       </div>
-      <Chips items={values.map((x) => lbl(x, field))} onRemove={(v) => setValues(values.filter((x) => lbl(x, field) !== v))} />
-      <Chips items={excluded.map((x) => lbl(x, exField))} tone="exclude" onRemove={(v) => setExcluded(excluded.filter((x) => lbl(x, exField) !== v))} />
+      {/* A6: 50 chips are ~10 wrapped rows; bounding them keeps the kind checkboxes reachable
+          without a long scroll now that the panel itself scrolls. */}
+      <div className="max-h-40 overflow-y-auto">
+        <Chips items={values.map((x) => lbl(x, field))} onRemove={(v) => setValues(values.filter((x) => lbl(x, field) !== v))} />
+        <Chips items={excluded.map((x) => lbl(x, exField))} tone="exclude" onRemove={(v) => setExcluded(excluded.filter((x) => lbl(x, exField) !== v))} />
+      </div>
       {values.length + excluded.length >= LOCATION_CAP && (
         <p className="mt-1 px-1 text-[11px] text-amber-600">{LOCATION_CAP} locations max — remove some to add more.</p>
       )}

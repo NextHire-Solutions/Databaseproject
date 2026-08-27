@@ -33,6 +33,7 @@ interface Profile {
   agent: Record<string, string | number | null> & {
     full_name: string | null;
     agent_provided?: { email?: string; phone?: string; added_by?: string; added_at?: string } | null;
+    manual_titles?: string[] | null; // A5: hand-applied role tags
   };
   mls: MlsRow[];
   sources: { source: string; sales_volume: string | null; units: string | null; scraped: string | null }[];
@@ -101,6 +102,8 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
     };
   }, [agentId, reloadKey]);
 
+  const [tagging, setTagging] = useState(false);
+
   async function saveProvided() {
     if (saving) return;
     setSaving(true);
@@ -117,6 +120,29 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
     }
     toast.success(newEmail.trim() || newPhone.trim() ? "Contact info saved — campaign sends will prefer it" : "Agent-provided contact removed");
     setEditOpen(false);
+    setReloadKey((k) => k + 1);
+  }
+
+  // A5: tag a role by hand. Stored apart from the derived title so the next data sweep cannot
+  // erase it; the server returns the recomputed effective title.
+  const ROLES = ["Managing Broker", "Team Leader"] as const;
+  async function toggleRole(role: string) {
+    if (tagging) return;
+    const cur = profile?.agent?.manual_titles ?? [];
+    const next = cur.includes(role) ? cur.filter((r) => r !== role) : [...cur, role];
+    setTagging(true);
+    const res = await fetch("/api/agents/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: agentId, titles: next }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setTagging(false);
+    if (!res.ok) {
+      toast.error(j.error ?? "Failed to save tag");
+      return;
+    }
+    toast.success(next.length ? `Tagged as ${next.join(", ")}` : "Role tags cleared");
     setReloadKey((k) => k + 1);
   }
 
@@ -138,6 +164,26 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
               <div className="text-neutral-600">
                 {String(a.title ?? "")}
                 {a.license_number ? ` · License #${a.license_number}` : ""}
+                {/* A5: role tags. Checked = tagged by hand here; a role that came from the data
+                    feed shows in the title above but leaves these unchecked, so it is always
+                    clear which roles a person asserted vs which the feed supplied. */}
+                <div className="mt-1 flex items-center gap-3">
+                  {ROLES.map((r) => {
+                    const on = (a.manual_titles ?? []).includes(r);
+                    return (
+                      <label key={r} className="flex items-center gap-1.5 text-xs text-neutral-500">
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          disabled={tagging}
+                          onChange={() => toggleRole(r)}
+                          className="h-3.5 w-3.5 rounded border-neutral-300"
+                        />
+                        Tag as {r}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
               <div className="truncate text-neutral-600">{[a.brand, a.office_name].filter(Boolean).join(" — ") || "No office on file"}</div>
               <div className="truncate text-neutral-600">

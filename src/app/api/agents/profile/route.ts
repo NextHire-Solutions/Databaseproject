@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
       `select id, full_name, first_name, last_name, license_number, title, brand, office_name,
               preferred_email, enriched_email, preferred_phone, linkedin_url,
               source_ids->'agent_provided' as agent_provided,
+              source_ids->'manual'->'titles' as manual_titles,
               home_city, home_state, home_zip, office_city, office_state, office_zip,
               most_transacted_city, est_time_in_industry_raw, est_time_in_industry_months,
               sales_volume, pct_change, buy_side_dollar, list_side_dollar, approx_gci,
@@ -79,6 +80,26 @@ export async function PATCH(req: NextRequest) {
   }
 
   const pool = getPool();
+
+  // A5: role tags are a separate concern from contact info. Handled first and returned early so
+  // the agent_provided REPLACE semantics below can never touch them — that object is rebuilt on
+  // every contact save, which is exactly why the tags do not live inside it.
+  if (Array.isArray(body.titles)) {
+    const titles = (body.titles as unknown[]).filter(
+      (t): t is string => t === "Managing Broker" || t === "Team Leader"
+    );
+    const { rows, rowCount } = await pool.query(
+      `select fn_set_manual_titles($1::uuid, $2::text[], $3) as title`,
+      [id, titles, user.email ?? user.id]
+    );
+    if (!rowCount) return NextResponse.json({ error: "not found" }, { status: 404 });
+    await pool.query(`insert into audit_logs (action, performed_by, details) values ('agent_title_tagged', $1, $2)`, [
+      user.email ?? user.id,
+      `Agent ${id}: manual title tags = ${titles.length ? titles.join(", ") : "(cleared)"}`,
+    ]);
+    return NextResponse.json({ ok: true, title: rows[0]?.title ?? null, manual_titles: titles });
+  }
+
   // REPLACE semantics: the form sends both fields; an emptied field removes that piece,
   // and clearing both removes the agent-provided entry entirely.
   if (!email && !phone) {

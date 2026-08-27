@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,8 +34,20 @@ export function FilterPopoverShell({
   width?: string;
   children: React.ReactNode;
 }) {
+  // A7: dismissing by clicking away COMMITS the draft instead of discarding it — losing a long
+  // selection to a stray click was the reported problem. Escape stays the discard gesture, so
+  // there is still a way out. escRef survives the dismiss because Radix fires onEscapeKeyDown
+  // before onOpenChange(false).
+  const escRef = useRef(false);
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && open && !escRef.current) onApply();
+        escRef.current = false;
+        onOpenChange(o);
+      }}
+    >
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -54,9 +66,27 @@ export function FilterPopoverShell({
           <ChevronDown className={cn("ml-0.5 h-4 w-4", count > 0 ? "text-white/70" : "text-neutral-400")} />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className={cn("rounded-2xl border-neutral-200 p-4 shadow-xl", width)}>
-        {children}
-        <div className="mt-4 flex items-center justify-end gap-4">
+      {/* A6: the panel is portaled and position:fixed, so page scrolling can never reveal a
+          bottom that overflows the viewport — with ~50 selections the Apply row simply sat
+          off-screen and zooming out was the only way to reach it. Bound the panel to the space
+          Radix already measures, scroll the body, and pin the footer.
+          Three details are load-bearing: p-0 here with p-4 on the scroller (otherwise the
+          padding sits outside the scroll area and hides the last row), min-h-0 on the scroller
+          (a flex child will not shrink below its content without it, which silently defeats the
+          whole thing), and collisionPadding (the available-height var is derived from it, and
+          the default 0 puts the panel flush against the viewport edge). */}
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        collisionPadding={12}
+        onEscapeKeyDown={() => { escRef.current = true; }}
+        className={cn(
+          "flex max-h-[var(--radix-popover-content-available-height)] flex-col rounded-2xl border-neutral-200 p-0 shadow-xl",
+          width
+        )}
+      >
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+        <div className="flex shrink-0 items-center justify-end gap-4 border-t border-neutral-200 px-4 py-3">
           <button type="button" onClick={onClear} className="text-sm font-medium text-neutral-700 hover:text-neutral-900">
             Clear
           </button>

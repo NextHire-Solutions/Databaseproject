@@ -436,7 +436,13 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const highlightedCols = highlightedColumns(filters, mode);
 
   function setF<K extends keyof Filters>(k: K, v: Filters[K]) {
-    setFilters((p) => ({ ...p, [k]: v }));
+    setFilters((p) => {
+      // A7 companion: dismissing a popover now commits its draft, so merely opening and closing
+      // one calls this with an unchanged value. Without this guard every stray click outside a
+      // filter would fire a fresh /api/search/filter round-trip on 1.1M rows.
+      if (JSON.stringify(p[k]) === JSON.stringify(v)) return p;
+      return { ...p, [k]: v };
+    });
     setPage(1);
   }
   function clearAllFilters() {

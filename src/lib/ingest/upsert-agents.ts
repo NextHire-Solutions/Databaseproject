@@ -55,8 +55,13 @@ const digits = (v: unknown): string | null => {
   const s = txt(v);
   return s == null ? null : s.replace(/[^0-9]/g, "");
 };
-const deriveTitle = (r: Row): string =>
-  yn(r["Is Managing Broker"]) ? "Managing Broker" : yn(r["Is Team Leader"]) ? "Team Leader" : "Salesperson";
+// Both flags can be set on the same agent (1,798 today), so emit BOTH roles rather than letting
+// Managing Broker mask Team Leader — the old either/or is why those combined rows were one sweep
+// away from losing half their title. Canonical order matches fn_effective_title.
+const deriveTitle = (r: Row): string => {
+  const roles = [yn(r["Is Managing Broker"]) && "Managing Broker", yn(r["Is Team Leader"]) && "Team Leader"].filter(Boolean);
+  return roles.length ? roles.join(", ") : "Salesperson";
+};
 
 // "23 years 8 months of experience" / "22" -> months
 function yearsToMos(raw: unknown): number | undefined {
@@ -576,6 +581,15 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
             return `${n} = case when 'courted' = any(coalesce(a.sources, array[]::text[])) then coalesce(a.${n}, x.${n}) else coalesce(x.${n}, a.${n}) end`;
           }
           if (METRIC_COLS.has(n)) return `${n} = coalesce(x.${n}, a.${n})`;
+          // A5: a hand-applied Team Leader / Managing Broker tag must survive the sweep. Title
+          // is otherwise a full refresh, so an untagged agent takes the derived value exactly as
+          // before — the guard keeps the 150k-250k-rows/day common path off the function
+          // entirely, and only tagged agents pay for the union.
+          if (n === "title") {
+            return `title = case when a.source_ids ? 'manual'
+                                 then fn_effective_title(x.title, a.source_ids->'manual'->'titles')
+                                 else x.title end`;
+          }
           return `${n} = x.${n}`;
         })
         .join(", ");
