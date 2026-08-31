@@ -275,6 +275,10 @@ function mergeColOrder(saved: string[]): string[] {
 const LOC_MODE_COLUMNS: Col[] = [
   { key: "location", label: "Location", sortBy: "location", defaultDir: "asc", render: (r) => <span className="font-semibold text-neutral-900">{na(r.location as string | null)}</span> },
   { key: "locAgents", label: "Agents", sortBy: "agents", align: "right", render: (r) => numv(r.agents as number | null) },
+  // Leaders = any agent whose title carries a role (Team Leader, Managing Broker, or both);
+  // Salespersons = everyone else. The two always sum to Agents.
+  { key: "leaders", label: "TL / MB", sortBy: "leaders", align: "right", render: (r) => numv(r.leaders as number | null) },
+  { key: "salespersons", label: "Salespersons", sortBy: "salespersons", align: "right", render: (r) => numv(r.salespersons as number | null) },
   { key: "locOffices", label: "Offices", sortBy: "offices", align: "right", render: (r) => numv(r.offices as number | null) },
   { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (r) => usd(r.sales_volume) },
   { key: "units", label: "Units", sortBy: "units", align: "right", render: (r) => numv(r.units) },
@@ -284,6 +288,8 @@ const LOC_MODE_COLUMNS: Col[] = [
 const MLS_MODE_COLUMNS: Col[] = [
   { key: "mlsName", label: "MLS", sortBy: "mls", defaultDir: "asc", render: (r) => <span className="font-semibold text-neutral-900">{na(r.label as string | null)}{r.code && r.label !== r.code ? <span className="font-normal text-neutral-400"> ({String(r.code)})</span> : null}</span> },
   { key: "locAgents", label: "Agents", sortBy: "agents", align: "right", render: (r) => numv(r.agents as number | null) },
+  { key: "leaders", label: "TL / MB", sortBy: "leaders", align: "right", render: (r) => numv(r.leaders as number | null) },
+  { key: "salespersons", label: "Salespersons", sortBy: "salespersons", align: "right", render: (r) => numv(r.salespersons as number | null) },
   { key: "locOffices", label: "Offices", sortBy: "offices", align: "right", render: (r) => numv(r.offices as number | null) },
   { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (r) => usd(r.sales_volume) },
   { key: "units", label: "Units", sortBy: "units", align: "right", render: (r) => numv(r.units) },
@@ -954,9 +960,11 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                         const cellHit = !!hitCol && (col.key === hitCol || col.key === "agent");
                         // A13/B5: office & brand cells jump to the agent grid with that value
                         // applied as an Include filter; the agent name opens the profile (A5).
+                        // B-hyperlink: the same applies in the AGENT grid — clicking an office or
+                        // brand cell applies it as the Office Search filter right there.
                         const jumpKind =
-                          mode === "office" && col.key === "office" ? "office"
-                          : (mode === "office" || mode === "brand") && col.key === "brand" ? "brand"
+                          (mode === "office" || mode === "agent") && col.key === "office" ? "office"
+                          : (mode === "office" || mode === "brand" || mode === "agent") && col.key === "brand" ? "brand"
                           : null;
                         const jumpValue = jumpKind === "office" ? a.office_name : jumpKind === "brand" ? a.brand : null;
                         const isProfile = mode === "agent" && col.key === "agent" && !!a.id;
