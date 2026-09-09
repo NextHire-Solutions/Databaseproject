@@ -138,6 +138,10 @@ const ITEM_TONE: Record<string, string> = {
   pushing: "bg-blue-100 text-blue-800",
 };
 const STEP_LABEL: Record<string, string> = {
+  // v2 pipeline (Sep 2026)
+  verify_preferred_mv: "Verify existing email",
+  db_domain: "Office domain (from DB)",
+  verify_work_mv: "Verify work email",
   verify_personal_courted: "Verify Courted personal",
   verify_professional_courted: "Verify Courted work",
   find_linkedin: "Find LinkedIn",

@@ -23,9 +23,10 @@
 //   POLL_MS                      idle sleep between cycles, default 5000
 //   CLAIM_BATCH                  items claimed per cycle, default 25
 //   STALE_MIN                    reclaim items stuck in a transient status, default 60
-//   BETTERENRICH_API_KEY         BetterEnrich (personal/work email finders)
-//   INSTANTLY_API_KEY            Instantly (email verification)
-//   OPENAI_API_KEY               "Claygent" web-research steps (LinkedIn + office domain)
+//   BETTERENRICH_API_KEY         BetterEnrich work-email finder (v2; personal finder legacy)
+//   MILLIONVERIFIER_API_KEY      MillionVerifier (v2 verification — replaces Instantly)
+//   OPENAI_API_KEY               OPTIONAL in v2: office-domain lookup fallback only
+//   INSTANTLY_API_KEY            legacy flow only (see enrichAgentLegacy)
 //   USE_PREFERRED_EMAIL_FALLBACK "1" = use agents.preferred_email when provider keys are not
 //                                set (testing only — result is NOT cached on agents)
 
@@ -338,6 +339,37 @@ async function loadAgents(agentIds) {
   const { rows } = await pool.query(
     `select a.*, (select m.code from agent_mls am join mls m on m.id = am.mls_id
                    where am.agent_id = a.id limit 1) as mls_code,
+            -- v2 enrichment: the brokerage's website domain, voted from OFFICE COLLEAGUES'
+            -- professional emails (the agent's own never votes — it may be the very address
+            -- that just failed verification). Free and instant; null falls back to the OpenAI
+            -- domain lookup.
+            --
+            -- The thresholds are the whole point. A plain "most common domain" was measured at
+            -- 32.8% coverage but produced garbage: 'LBE Inc' -> cox.net (an ISP) and 'ROA
+            -- California Inc' -> aqteamrealty.com (a different brand sharing the office row).
+            -- A wrong domain here does not just miss — it makes BetterEnrich FABRICATE an
+            -- address at someone else's company, which can verify 'ok' on a catch-all and mail
+            -- a stranger. So: >= 2 colleagues must share the domain AND it must be >= 60% of
+            -- that office's professional emails. Coverage falls to 10% and every sample is
+            -- correct (Keller Williams -> kw.com); the other 90% pays for a domain lookup,
+            -- which is the cheap, safe outcome.
+            (select d.dom from (
+               select split_part(lower(a2.preferred_email), '@', 2) as dom, count(*) as n,
+                      count(*)::numeric / nullif(sum(count(*)) over (), 0) as share
+                 from agents a2
+                where a2.office_id = a.office_id and a2.id <> a.id
+                  and a2.preferred_email like '%@%'
+                  and split_part(lower(a2.preferred_email), '@', 2) not in (
+                    'gmail.com','yahoo.com','outlook.com','hotmail.com','aol.com','comcast.net',
+                    'icloud.com','me.com','live.com','msn.com','proton.me','protonmail.com',
+                    'yandex.com','zoho.com','rediffmail.com','gmx.com','mail.com','inbox.com',
+                    'cox.net','verizon.net','att.net','sbcglobal.net','bellsouth.net','charter.net',
+                    'roadrunner.com','rr.com','earthlink.net','windstream.net','frontier.com',
+                    'optonline.net','juno.com','netzero.net','ymail.com','rocketmail.com',
+                    'googlemail.com','hotmail.co.uk','yahoo.ca','pm.me','mac.com','aim.com')
+                group by 1) d
+              where d.n >= 2 and d.share >= 0.6
+              order by d.n desc, d.dom limit 1) as office_domain,
             (select jsonb_object_agg(e.k, case when e.v ? 'city'
                       then jsonb_set(e.v, '{city}', coalesce(to_jsonb(fn_norm_city(e.v->>'city')), 'null'::jsonb))
                       else e.v end)

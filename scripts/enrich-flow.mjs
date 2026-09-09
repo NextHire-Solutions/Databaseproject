@@ -1,4 +1,19 @@
-// The enrichment flow — an exact replica of the client's Clay table, decoded column by column
+// The enrichment flow.
+//
+// ============================== CURRENT FLOW (v2, Sep 2026) ==============================
+// Client-directed rebuild ("scratch this and use MillionVerifier / don't search personal"):
+//
+//   1. Preferred email present -> verify with MillionVerifier. result "ok" -> USE IT.
+//   2. Otherwise (no email, or verification failed) -> WORK-EMAIL enrichment only:
+//        company domain (worker-supplied from our own DB; OpenAI lookup as fallback)
+//        -> BetterEnrich work finder -> MillionVerifier again. "ok" -> use, else no email.
+//   3. PERSONAL-EMAIL SEARCH IS RETIRED (LinkedIn hunt + BetterEnrich personal): the client
+//      may want it back, so the whole legacy flow is preserved below as enrichAgentLegacy —
+//      switching back is re-pointing the enrichAgent export, nothing else.
+//   Safe verdict = MillionVerifier result "ok" ONLY (catch_all/unknown/risky are not sent).
+//
+// ============================ LEGACY FLOW (Jul-Sep 2026, kept) ============================
+// An exact replica of the client's Clay table, decoded column by column
 // from screenshots (July 2026). Two branches, gated on whether Courted gave a preferred email:
 //
 //   BRANCH A — "No Emails -> Enrich Both" (no preferred email):
@@ -16,10 +31,10 @@
 //     Final Email = safe personal first, else safe professional (personal priority).
 //
 // Providers (env keys):
-//   BETTERENRICH_API_KEY — find-personal-email-alt / find-work-email-low-cost-v2-alt
-//   INSTANTLY_API_KEY    — Verify Email (the Clay table used the brokerstaffer-instantly account)
-//   OPENAI_API_KEY       — the two "Claygent" web-research steps (GPT-4o Mini + web search),
-//                          prompts copied verbatim from the Clay columns.
+//   BETTERENRICH_API_KEY     — find-work-email-low-cost-v2-alt (v2); personal finder legacy-only
+//   MILLIONVERIFIER_API_KEY  — v2 verification (replaces Instantly)
+//   OPENAI_API_KEY           — OPTIONAL in v2: domain lookup fallback when our DB has no domain
+//   INSTANTLY_API_KEY        — legacy flow only, no longer required
 
 const env = process.env;
 
@@ -40,6 +55,14 @@ const isProfessionalEmail = (e) => EMAIL_RE.test(lc(e)) && !PERSONAL_DOMAINS.som
 const isSafe = (status) => SAFE_STATUSES.includes(lc(status));
 
 export function providersConfigured() {
+  // v2: MillionVerifier + BetterEnrich. OpenAI is optional (domain-lookup fallback only);
+  // Instantly is legacy-only. Until MILLIONVERIFIER_API_KEY is set on the worker, the enrich
+  // stage idles safely (items wait as pending) rather than running the retired flow.
+  return !!(env.BETTERENRICH_API_KEY && env.MILLIONVERIFIER_API_KEY);
+}
+
+// Legacy gate, kept for a switch-back (see enrichAgentLegacy).
+export function legacyProvidersConfigured() {
   return !!(env.BETTERENRICH_API_KEY && env.INSTANTLY_API_KEY && env.OPENAI_API_KEY);
 }
 
@@ -124,6 +147,27 @@ async function instantlyVerify(email) {
   }
   return lc(status) || "unknown";
 }
+
+// ---------------------------------------------------------------------------
+// MillionVerifier (v2 verifier). Single-check API; the verdict is `result`:
+// ok | catch_all | unknown | disposable | invalid. Client decision (Sep 2026):
+// ONLY "ok" is safe to send — catch_all raises bounce risk and is rejected.
+// ---------------------------------------------------------------------------
+async function millionVerify(email) {
+  const j = await jsonFetch(
+    `https://api.millionverifier.com/api/v3/?api=${encodeURIComponent(env.MILLIONVERIFIER_API_KEY)}&email=${encodeURIComponent(email)}&timeout=20`,
+    { method: "GET" },
+    { timeoutMs: 45000 }
+  );
+  const verdict = lc(j?.result) || "unknown";
+  // surface quota exhaustion as an ERROR (cleanRun=false), never as a verdict — otherwise an
+  // empty MV account would silently mark every lead unsendable and cache it
+  if (verdict === "error" || /credit|api key/i.test(String(j?.error ?? ""))) {
+    throw new Error(`MillionVerifier error: ${JSON.stringify(j).slice(0, 150)}`);
+  }
+  return verdict;
+}
+const isSafeMV = (verdict) => verdict === "ok";
 
 // ---------------------------------------------------------------------------
 // "Claygent" web research — GPT-4o Mini + web search via the OpenAI Responses API,
@@ -231,12 +275,78 @@ Step 7: Return only the verified domain in this format: example.com No "https://
 }
 
 // ---------------------------------------------------------------------------
-// The flow itself. Returns { email, status, provider } | null, plus writes a step trace
-// into `log`. Provider misses are just "miss" entries in the trace.
-// A step that ERRORS (vs. missing) flips cleanRun=false via the `errors` counter so the
-// caller never caches a not-found produced by an outage.
+// THE v2 FLOW (current). Returns { hit, cleanRun } like the legacy one, same step-trace
+// contract, so the worker needs no changes beyond passing agent.office_domain.
+//
+//   has email -> MV verify -> ok? use : work-hunt
+//   no email  -> work-hunt
+//   work-hunt = domain (DB-first via agent.office_domain, OpenAI fallback)
+//               -> BetterEnrich work finder -> MV verify -> ok? use : nothing
 // ---------------------------------------------------------------------------
 export async function enrichAgent(agent, log) {
+  let errors = 0;
+  const step = async (name, fn) => {
+    const t0 = Date.now();
+    try {
+      const out = await fn();
+      log.push({ step: name, ok: true, ms: Date.now() - t0, note: out == null || out === "" ? "miss" : String(out).slice(0, 120) });
+      return out;
+    } catch (e) {
+      errors++;
+      log.push({ step: name, ok: false, ms: Date.now() - t0, note: (e instanceof Error ? e.message : "error").slice(0, 200) });
+      return null;
+    }
+  };
+
+  const preferred = (agent.preferred_email ?? "").trim();
+  let result = null;
+
+  // 1) verify what we already have
+  if (preferred) {
+    const v = await step("verify_preferred_mv", () => millionVerify(preferred));
+    if (isSafeMV(v)) {
+      result = {
+        email: preferred, status: v,
+        provider: isPersonalEmail(preferred) ? "courted_personal" : "courted_professional",
+      };
+    }
+  }
+
+  // 2) work-email enrichment — the single funnel for BOTH no-email and failed-verify leads.
+  //    Personal-email search is retired; see enrichAgentLegacy below to restore it.
+  if (!result) {
+    let domain = null;
+    if (agent.office_domain) {
+      domain = agent.office_domain;
+      log.push({ step: "db_domain", ok: true, ms: 0, note: domain });
+    } else if (env.OPENAI_API_KEY && agent.office_name) {
+      domain = await step("find_domain", () => findDomain(agent));
+    }
+    const work = domain ? await step("be_work", () => beWorkEmail(agent.full_name, domain)) : null;
+    if (work && lc(work) === lc(preferred)) {
+      // the finder returned the exact email that just failed verification — don't pay to
+      // re-verify a known-bad address
+      log.push({ step: "verify_work_mv", ok: true, ms: 0, note: "same as failed preferred — skipped" });
+    } else if (work) {
+      const v2 = await step("verify_work_mv", () => millionVerify(work));
+      if (isSafeMV(v2)) result = { email: work, status: v2, provider: "betterenrich_professional" };
+    }
+  }
+
+  return { hit: result, cleanRun: errors === 0 };
+}
+
+// ---------------------------------------------------------------------------
+// ============================= RETIRED, KEPT ON PURPOSE =============================
+// The legacy flow (personal-email search + Instantly), retired Sep 2026 per client
+// instruction "don't search for personal email". Kept fully intact — the client may want
+// to switch back. To restore: export this as enrichAgent and use legacyProvidersConfigured.
+// Returns { email, status, provider } | null, plus writes a step trace into `log`.
+// Provider misses are just "miss" entries in the trace. A step that ERRORS (vs. missing)
+// flips cleanRun=false via the `errors` counter so the caller never caches a not-found
+// produced by an outage.
+// ---------------------------------------------------------------------------
+export async function enrichAgentLegacy(agent, log) {
   let errors = 0;
   const step = async (name, fn) => {
     const t0 = Date.now();
