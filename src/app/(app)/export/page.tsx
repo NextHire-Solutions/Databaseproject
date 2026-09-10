@@ -156,6 +156,29 @@ const STEP_LABEL: Record<string, string> = {
   client_dedup: "Client dedup",
 };
 
+// A step's icon must reflect its OUTCOME, not merely that the API call completed.
+// `ok` on a step only means "no exception" — so a rejected catch_all verdict was rendering
+// with a green tick, reading as if it had passed. Verdict wins; errors and misses are red.
+const VERIFY_STEPS = new Set([
+  "verify_preferred_mv", "verify_work_mv",
+  // legacy (Instantly) steps, so historical batches read correctly too
+  "verify_personal_courted", "verify_professional_courted", "verify_personal",
+  "verify_personal_be", "verify_work", "verify_work_be",
+]);
+const SAFE_NOTES = new Set(["ok", "valid", "verified", "deliverable"]);
+
+function stepVerdict(e: StepEntry): { icon: string; cls: string; hint: string } {
+  const note = (e.note ?? "").toLowerCase();
+  if (!e.ok) return { icon: "✗", cls: "text-red-600", hint: "step errored" };
+  if (note === "miss" || note === "") return { icon: "—", cls: "text-neutral-400", hint: "nothing found" };
+  if (VERIFY_STEPS.has(e.step)) {
+    if (SAFE_NOTES.has(note)) return { icon: "✓", cls: "text-green-600", hint: "accepted" };
+    if (note.includes("skipped")) return { icon: "—", cls: "text-neutral-400", hint: "not checked" };
+    return { icon: "✗", cls: "text-amber-600", hint: "rejected — not safe to send" };
+  }
+  return { icon: "✓", cls: "text-green-600", hint: "found" };
+}
+
 // Clay-style grid: one row per lead; columns are the pipeline steps that actually ran in
 // THIS batch (union, in first-seen order), each cell the step's verdict + result note.
 function BatchLeadsDialog({ batch, onClose }: { batch: BatchRow; onClose: () => void }) {
@@ -293,9 +316,9 @@ function BatchLeadsDialog({ batch, onClose }: { batch: BatchRow; onClose: () => 
                           <td
                             key={s}
                             className="max-w-52 truncate whitespace-nowrap px-3 py-2 text-xs"
-                            title={`${e.ok ? "ok" : "failed"}${e.ms != null ? ` · ${(e.ms / 1000).toFixed(1)}s` : ""}${e.note ? ` · ${e.note}` : ""}`}
+                            title={`${stepVerdict(e).hint}${e.ms != null ? ` · ${(e.ms / 1000).toFixed(1)}s` : ""}${e.note ? ` · ${e.note}` : ""}`}
                           >
-                            <span className={e.ok ? "text-green-600" : "text-red-600"}>{e.ok ? "✓" : "✗"}</span>
+                            <span className={stepVerdict(e).cls}>{stepVerdict(e).icon}</span>
                             {e.note && <span className="ml-1 text-neutral-500">{e.note}</span>}
                           </td>
                         );
