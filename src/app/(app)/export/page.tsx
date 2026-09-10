@@ -167,16 +167,28 @@ const VERIFY_STEPS = new Set([
 ]);
 const SAFE_NOTES = new Set(["ok", "valid", "verified", "deliverable"]);
 
-function stepVerdict(e: StepEntry): { icon: string; cls: string; hint: string } {
+// Two independent facts, shown separately: did the STEP run (tick / red cross), and was its
+// RESULT accepted or rejected (the note's colour plus an explicit "rejected" tag). Collapsing
+// them into one icon was misleading in both directions — a rejected catch_all looked like a
+// pass, and marking it a cross implied the step had failed when it worked perfectly.
+function stepVerdict(e: StepEntry): {
+  icon: string; iconCls: string; noteCls: string; tag: string | null; hint: string;
+} {
   const note = (e.note ?? "").toLowerCase();
-  if (!e.ok) return { icon: "✗", cls: "text-red-600", hint: "step errored" };
-  if (note === "miss" || note === "") return { icon: "—", cls: "text-neutral-400", hint: "nothing found" };
+  if (!e.ok) return { icon: "✗", iconCls: "text-red-600", noteCls: "text-red-600", tag: null, hint: "step failed to run" };
+
+  const base = { icon: "✓", iconCls: "text-green-600" };
+  if (note === "miss" || note === "")
+    return { ...base, noteCls: "text-neutral-400", tag: null, hint: "ran · nothing found" };
+  if (note.includes("skipped"))
+    return { ...base, noteCls: "text-neutral-400", tag: null, hint: "not checked" };
+
   if (VERIFY_STEPS.has(e.step)) {
-    if (SAFE_NOTES.has(note)) return { icon: "✓", cls: "text-green-600", hint: "accepted" };
-    if (note.includes("skipped")) return { icon: "—", cls: "text-neutral-400", hint: "not checked" };
-    return { icon: "✗", cls: "text-amber-600", hint: "rejected — not safe to send" };
+    return SAFE_NOTES.has(note)
+      ? { ...base, noteCls: "text-green-700", tag: null, hint: "ran · accepted" }
+      : { ...base, noteCls: "text-amber-700", tag: "rejected", hint: "ran · rejected — not safe to send" };
   }
-  return { icon: "✓", cls: "text-green-600", hint: "found" };
+  return { ...base, noteCls: "text-neutral-600", tag: null, hint: "ran · found" };
 }
 
 // Clay-style grid: one row per lead; columns are the pipeline steps that actually ran in
@@ -318,8 +330,20 @@ function BatchLeadsDialog({ batch, onClose }: { batch: BatchRow; onClose: () => 
                             className="max-w-52 truncate whitespace-nowrap px-3 py-2 text-xs"
                             title={`${stepVerdict(e).hint}${e.ms != null ? ` · ${(e.ms / 1000).toFixed(1)}s` : ""}${e.note ? ` · ${e.note}` : ""}`}
                           >
-                            <span className={stepVerdict(e).cls}>{stepVerdict(e).icon}</span>
-                            {e.note && <span className="ml-1 text-neutral-500">{e.note}</span>}
+                            {(() => {
+                              const v = stepVerdict(e);
+                              return (
+                                <>
+                                  <span className={v.iconCls}>{v.icon}</span>
+                                  {e.note && <span className={`ml-1 ${v.noteCls}`}>{e.note}</span>}
+                                  {v.tag && (
+                                    <span className="ml-1 rounded bg-amber-100 px-1 py-px text-[10px] font-medium uppercase tracking-wide text-amber-800">
+                                      {v.tag}
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </td>
                         );
                       })}
