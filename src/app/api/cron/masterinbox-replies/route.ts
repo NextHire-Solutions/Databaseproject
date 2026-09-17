@@ -13,6 +13,11 @@ import { getPool } from "@/lib/db/pool";
 // to agents by email (preferred_email or enriched_email, both lowercased) — the same key the
 // sequencer mirrors already use.
 //
+// One message can match SEVERAL agents: 210 replying addresses belong to more than one agent
+// record (usually duplicate agent rows for the same person). Each gets its own row, so none of
+// them loses the flag — hence the (source, external_id, agent_id) conflict key rather than
+// (source, external_id), which silently kept only the first and cost 224 agents their flag.
+//
 // Incremental: picks up where it left off using the newest MasterInbox reply already stored,
 // minus a re-read window, because `sent_at` is the message time and a message can land in the
 // table slightly after the moment it claims. Re-reading is free — inserts are idempotent on
@@ -91,7 +96,7 @@ async function handle(req: NextRequest) {
                     as x(external_id text, email text, replied_at text, provider text)
              join agents a
                on lower(a.preferred_email) = x.email or lower(a.enriched_email) = x.email
-           on conflict (source, external_id) where external_id is not null do nothing`,
+           on conflict (source, external_id, agent_id) where external_id is not null do nothing`,
           [JSON.stringify(rows)]
         );
         inserted += ins.rowCount ?? 0;
