@@ -264,7 +264,12 @@ async function runLeadSync(pool: any, key: string, base: string) {
       }
       if (!complete) throw new Error("replied sweep: page cap hit — refusing to clear flags from a truncated list");
       repliedTotal = repliedEmails.length;
-      await pool.query("update bison_client_leads set replied = (email = any($1::text[])) where replied is distinct from (email = any($1::text[]))", [repliedEmails]);
+      // RETIRED 2026-09 (client): replies now come from MasterInbox via
+      // /api/cron/masterinbox-replies -> agent_replies, which is append-only. This UPDATE is the
+      // line that made a deleted campaign un-reply an agent: absence from the sweep cleared the
+      // flag, and the mirror row itself is pruned when its campaign disappears. Left in place,
+      // commented, because the client may want the sequencer path back.
+      //   await pool.query("update bison_client_leads set replied = (email = any($1::text[])) where replied is distinct from (email = any($1::text[]))", [repliedEmails]);
     } catch (e) {
       warnings.push(`replied sweep failed: ${e instanceof Error ? e.message : "error"}`);
     }

@@ -1,4 +1,5 @@
-// Railway cron-service entrypoint: runs BOTH provider syncs, in order, then exits.
+// Railway cron-service entrypoint: runs the provider syncs AND the MasterInbox reply pull,
+// in order, then exits.
 //
 // This replaced `node scripts/cron-bison-sync.mjs` as the bison-cron service's start command when
 // Instantly was connected, so one cron service covers both providers on the same 6-hourly schedule
@@ -31,6 +32,10 @@ function run(label, file) {
 
 const bison = run("bison-sync", "scripts/cron-bison-sync.mjs");
 const instantly = run("instantly-sync", "scripts/cron-instantly-sync.mjs");
+// Replies come from MasterInbox since 2026-09, not from the sequencer sweeps. Independent of the
+// two above for the same reason they are independent of each other: a sequencer outage must not
+// stop reply data arriving.
+const replies = run("masterinbox-replies", "scripts/cron-masterinbox-replies.mjs");
 
-console.log(`\nsummary: bison=${bison === 0 ? "ok" : "FAILED"} instantly=${instantly === 0 ? "ok" : "FAILED"}`);
-process.exit(bison === 0 && instantly === 0 ? 0 : 1);
+console.log(`\nsummary: bison=${bison === 0 ? "ok" : "FAILED"} instantly=${instantly === 0 ? "ok" : "FAILED"} replies=${replies === 0 ? "ok" : "FAILED"}`);
+process.exit(bison === 0 && instantly === 0 && replies === 0 ? 0 : 1);
