@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Save, Trash2, FolderOpen, Pencil, Check, X, Search } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { Filters } from "@/types/agent-filters";
@@ -224,7 +225,12 @@ export function SavedViews({
                     className="flex min-w-0 items-center gap-2 text-left text-sm text-neutral-800"
                   >
                     <FolderOpen className="h-4 w-4 shrink-0 text-neutral-400" />
-                    <span className="truncate">{v.name}</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="truncate">{v.name}</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs break-words">{v.name}</TooltipContent>
+                    </Tooltip>
                     {v.cached_count != null && (
                       <span className="shrink-0 text-xs tabular-nums text-neutral-400">{v.cached_count.toLocaleString()}</span>
                     )}

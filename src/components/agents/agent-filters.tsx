@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Bucket, IncludeExclude, VolumeSide } from "@/types/agent-filters";
 import { TITLES } from "@/types/agent-filters";
@@ -830,7 +831,14 @@ export function SavedViewsPopover({
                     />
                   )}
                 </button>
-                <span className="min-w-0 flex-1 truncate text-sm text-neutral-800" title={v.name}>{v.name}</span>
+                {/* Names are truncated to keep the row on one line, so the full name has to be
+                    reachable on hover — a native title attribute alone is slow and easy to miss. */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="min-w-0 flex-1 cursor-default truncate text-sm text-neutral-800">{v.name}</span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs break-words">{v.name}</TooltipContent>
+                </Tooltip>
                 {v.count != null && (
                   <span
                     className={cn("shrink-0 text-xs tabular-nums", v.count > EMPTY_VIEW_THRESHOLD ? "font-medium text-amber-600" : "text-neutral-400")}
