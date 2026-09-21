@@ -186,7 +186,7 @@ export function SavedViews({
                   </button>
                 </div>
               ) : (
-                <div key={v.id} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-neutral-50">
+                <div key={v.id} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-neutral-50">
                   {onSelect && (
                     <button
                       type="button"
@@ -222,19 +222,23 @@ export function SavedViews({
                       setOpen(false);
                       toast.success(`Loaded "${v.name}"`);
                     }}
-                    className="flex min-w-0 items-center gap-2 text-left text-sm text-neutral-800"
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm text-neutral-800"
                   >
                     <FolderOpen className="h-4 w-4 shrink-0 text-neutral-400" />
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="truncate">{v.name}</span>
+                        <span className="min-w-0 flex-1 truncate">{v.name}</span>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="max-w-xs break-words">{v.name}</TooltipContent>
                     </Tooltip>
-                    {v.cached_count != null && (
-                      <span className="shrink-0 text-xs tabular-nums text-neutral-400">{v.cached_count.toLocaleString()}</span>
-                    )}
                   </button>
+                  {/* Count is its OWN column, not part of the name button: inside the button it
+                      sat immediately after the name, so a short name pulled it left and a long
+                      one pushed it right — the rows looked ragged. Fixed width + right alignment
+                      keeps every count in the same place regardless of name length. */}
+                  <span className="w-12 shrink-0 text-right text-xs tabular-nums text-neutral-400">
+                    {v.cached_count != null ? v.cached_count.toLocaleString() : ""}
+                  </span>
                   <div className="flex shrink-0 items-center gap-2">
                     <button
                       type="button"

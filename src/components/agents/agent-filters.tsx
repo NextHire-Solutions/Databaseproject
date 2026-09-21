@@ -841,7 +841,7 @@ export function SavedViewsPopover({
                 </Tooltip>
                 {v.count != null && (
                   <span
-                    className={cn("shrink-0 text-xs tabular-nums", v.count > EMPTY_VIEW_THRESHOLD ? "font-medium text-amber-600" : "text-neutral-400")}
+                    className={cn("w-12 shrink-0 text-right text-xs tabular-nums", v.count > EMPTY_VIEW_THRESHOLD ? "font-medium text-amber-600" : "text-neutral-400")}
                     title={v.count > EMPTY_VIEW_THRESHOLD ? "This view matches almost the whole database — it was probably saved with no filters applied. Re-save it with the filters you want." : undefined}
                   >
                     {v.count.toLocaleString()}{v.count > EMPTY_VIEW_THRESHOLD ? " ⚠" : ""}
