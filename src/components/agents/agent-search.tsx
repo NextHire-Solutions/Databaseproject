@@ -882,6 +882,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             {(mode === "agent" || mode === "office") && (
               <SavedViews
                 filters={filters}
+                selected={filters.savedViews.include}
+                onSelect={(ids) => setF("savedViews", { ...filters.savedViews, include: ids })}
                 onLoad={(f) => {
                   setFilters(normalizeFilters(f)); // fills newer keys + folds legacy orchClientId -> orchClientIds
                   setNameSearch(f.nameQuery ?? ""); // keep the top-bar search box in sync with the loaded view

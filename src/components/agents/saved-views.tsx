@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, Trash2, FolderOpen, Pencil, Check, X } from "lucide-react";
+import { Save, Trash2, FolderOpen, Pencil, Check, X, Search } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -16,13 +16,28 @@ interface SavedList {
   cached_count?: number | null; // B4: cached agent count, refreshed on save/edit/import/6h sync
 }
 
-export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: Filters) => void }) {
+export function SavedViews({
+  filters,
+  onLoad,
+  selected,
+  onSelect,
+}: {
+  filters: Filters;
+  onLoad: (f: Filters) => void;
+  // The live "Saved views" FILTER selection (savedViews.include). The tick beside each name
+  // toggles membership of that filter — i.e. exactly what picking the view in the Saved views
+  // filter popover does — as opposed to the name itself, which still LOADS the view's filters
+  // into the search. Two different actions, so they get two different controls.
+  selected?: string[];
+  onSelect?: (ids: string[]) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [lists, setLists] = useState<SavedList[]>([]);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [q, setQ] = useState(""); // filter the list by name
 
   async function load() {
     const r = await fetch("/api/lists");
@@ -105,6 +120,9 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
     }
   }
 
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? lists.filter((v) => v.name.toLowerCase().includes(needle)) : lists;
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -129,11 +147,24 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
           </Button>
         </div>
         <div className="mb-1 mt-3 text-xs font-medium text-neutral-500">Saved views</div>
+        {lists.length > 5 && (
+          <div className="relative mb-1.5">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search views…"
+              className="h-8 w-full rounded-lg border border-neutral-300 pl-8 pr-2 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+            />
+          </div>
+        )}
         <div className="max-h-56 space-y-0.5 overflow-auto">
-          {lists.length === 0 ? (
-            <div className="px-1 py-2 text-sm text-neutral-400">No saved views yet.</div>
+          {shown.length === 0 ? (
+            <div className="px-1 py-2 text-sm text-neutral-400">
+              {lists.length === 0 ? "No saved views yet." : "No views match."}
+            </div>
           ) : (
-            lists.map((v) =>
+            shown.map((v) =>
               editId === v.id ? (
                 <div key={v.id} className="flex items-center gap-2 rounded px-2 py-1.5">
                   <Input
@@ -155,6 +186,34 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
                 </div>
               ) : (
                 <div key={v.id} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-neutral-50">
+                  {onSelect && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = selected ?? [];
+                        const next = cur.includes(v.id) ? cur.filter((x) => x !== v.id) : [...cur, v.id];
+                        onSelect(next);
+                        toast.success(
+                          next.includes(v.id) ? `Filtering by "${v.name}"` : `Removed "${v.name}" from the filter`
+                        );
+                      }}
+                      title={
+                        (selected ?? []).includes(v.id)
+                          ? "Remove this view from the Saved views filter"
+                          : "Filter the search by this view (same as picking it in the Saved views filter)"
+                      }
+                      className="mr-1.5 shrink-0 text-neutral-400 hover:text-brand"
+                      aria-pressed={(selected ?? []).includes(v.id)}
+                    >
+                      {(selected ?? []).includes(v.id) ? (
+                        <span className="flex h-4 w-4 items-center justify-center rounded border border-brand bg-brand text-white">
+                          <Check className="h-3 w-3" />
+                        </span>
+                      ) : (
+                        <span className="block h-4 w-4 rounded border border-neutral-300" />
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
