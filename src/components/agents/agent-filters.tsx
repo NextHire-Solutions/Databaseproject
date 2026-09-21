@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -806,6 +806,30 @@ export function SavedViewsPopover({
             const on = inc.includes(v.id) ? "include" : exc.includes(v.id) ? "exclude" : "off";
             return (
               <div key={v.id} className="flex items-center gap-2 rounded-lg px-1 py-1">
+                {/* One-click tick = Include, mirroring the tick in the save panel so the two
+                    places behave the same. Include/Exclude stay: the tick is a shortcut for the
+                    common case, not a replacement — Exclude has no tick equivalent, and a row
+                    that is excluded reads as unticked (it is not included). */}
+                <button
+                  type="button"
+                  onClick={() => pick(v.id, "include")}
+                  aria-pressed={on === "include"}
+                  title={on === "include" ? `Stop filtering by "${v.name}"` : `Filter by "${v.name}"`}
+                  className="shrink-0 text-neutral-400 hover:text-brand"
+                >
+                  {on === "include" ? (
+                    <span className="flex h-4 w-4 items-center justify-center rounded border border-brand bg-brand text-white">
+                      <Check className="h-3 w-3" />
+                    </span>
+                  ) : (
+                    <span
+                      className={cn(
+                        "block h-4 w-4 rounded border",
+                        on === "exclude" ? "border-red-300 bg-red-50" : "border-neutral-300"
+                      )}
+                    />
+                  )}
+                </button>
                 <span className="min-w-0 flex-1 truncate text-sm text-neutral-800" title={v.name}>{v.name}</span>
                 {v.count != null && (
                   <span
