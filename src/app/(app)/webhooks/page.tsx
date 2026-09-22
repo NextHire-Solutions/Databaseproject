@@ -118,7 +118,14 @@ export default function ClientsPage() {
     <div className="flex h-full flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">Clients</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
+            Clients
+            {!loading && (
+              <span className="ml-2 align-middle text-base font-normal text-neutral-400">
+                {clients.length.toLocaleString()}
+              </span>
+            )}
+          </h1>
           <p className="mt-0.5 text-sm text-neutral-500">
             Managed by the onboarding system — new clients appear here automatically. Campaigns match by name
             (“Client Name + Sender + Market”); sends enrich each agent, skip leads already in the client’s campaigns, then upload to

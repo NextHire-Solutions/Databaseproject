@@ -61,6 +61,7 @@ export function ExportDialog({
   // The chosen clients drive which campaigns are offered (grouped per client). The rows exported
   // are still the current filtered list.
   const [allClients, setAllClients] = useState<{ id: string; client_name: string | null; lead_count: number }[]>([]);
+  const [clientQ, setClientQ] = useState(""); // search box over the client picker
   const [selectedClientIds, setSelectedClientIds] = useState<Set<string>>(new Set());
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set()); // bison_campaigns.id
@@ -236,6 +237,12 @@ export function ExportDialog({
       return n;
     });
 
+  // Client picker search. Selection is kept across searches: filtering the list never
+  // deselects a client you already chose, it only changes what is visible.
+  const shownClients = clientQ.trim()
+    ? allClients.filter((c) => (c.client_name ?? "Unnamed client").toLowerCase().includes(clientQ.trim().toLowerCase()))
+    : allClients;
+
   // Group the selected clients' campaigns under each client for the grouped multi-select.
   // Groups carry their client_id key — two clients can share a display name.
   const campaignGroups = Object.values(
@@ -373,10 +380,16 @@ export function ExportDialog({
               <div>
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-neutral-700">
-                    Clients <span className="font-normal text-neutral-400">({selectedClientIds.size} selected)</span>
+                    Clients{" "}
+                    <span className="font-normal text-neutral-400">
+                      ({selectedClientIds.size} of {allClients.length} selected
+                      {clientQ.trim() ? ` · ${shownClients.length} shown` : ""})
+                    </span>
                   </label>
                   <div className="flex gap-3 text-xs">
-                    <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSelectedClientIds(new Set(allClients.map((c) => c.id)))}>
+                    {/* Select all acts on the rows currently LISTED, so it composes with the
+                        search instead of silently selecting clients you cannot see. */}
+                    <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSelectedClientIds((prev) => new Set([...prev, ...shownClients.map((c) => c.id)]))}>
                       Select all
                     </button>
                     <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSelectedClientIds(new Set())}>
@@ -384,11 +397,21 @@ export function ExportDialog({
                     </button>
                   </div>
                 </div>
+                {allClients.length > 8 && (
+                  <input
+                    value={clientQ}
+                    onChange={(e) => setClientQ(e.target.value)}
+                    placeholder="Search clients…"
+                    className="mt-1.5 h-8 w-full rounded-lg border border-neutral-300 px-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+                  />
+                )}
                 <div className="mt-1.5 max-h-40 space-y-1 overflow-auto rounded-lg border border-neutral-200 p-3">
                   {allClients.length === 0 ? (
                     <p className="py-3 text-center text-sm text-neutral-400">No clients yet.</p>
+                  ) : shownClients.length === 0 ? (
+                    <p className="py-3 text-center text-sm text-neutral-400">No clients match.</p>
                   ) : (
-                    allClients.map((c) => (
+                    shownClients.map((c) => (
                       <label key={c.id} className="flex items-center gap-2 text-sm text-neutral-800">
                         <Checkbox checked={selectedClientIds.has(c.id)} onCheckedChange={() => toggleClient(c.id)} />
                         <span className="min-w-0 flex-1 truncate" title={c.client_name ?? "Unnamed client"}>{c.client_name ?? "Unnamed client"}</span>
