@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
 import { upsertAgentRows } from "@/lib/ingest/upsert-agents";
 import { logAudit } from "@/lib/api/log-audit";
+import { isChurned } from "@/lib/clients/lifecycle";
 
 export const maxDuration = 300;
 
@@ -38,6 +39,29 @@ export async function POST(req: NextRequest) {
     const c = (await getPool().query(`select client_name from orch_clients where id = $1`, [orchClientId])).rows[0];
     if (!c) return NextResponse.json({ error: "client not found" }, { status: 400 });
     clientName = c.client_name;
+
+    /*
+     * A churned client gets no new leads.
+     *
+     * This is the ONLY place anything writes orch_client_leads, so it is the
+     * whole enforcement point rather than one of several. Refusing here also
+     * means the rule cannot be bypassed by driving the endpoint directly,
+     * which a filtered dropdown would not have prevented.
+     *
+     * The agents themselves are NOT rejected: only the link to this client is
+     * refused. Whoever imported the file can still attach it to a live client.
+     *
+     * `isChurned` is false whenever the OS feed cannot be read, so a feed
+     * outage never blocks an import -- see lib/clients/lifecycle.ts.
+     */
+    if (await isChurned(clientName)) {
+      return NextResponse.json(
+        {
+          error: `"${clientName}" has churned, so new leads are not built for it. Pick a live client, or reactivate this one in the OS first.`,
+        },
+        { status: 409 }
+      );
+    }
   }
 
   const client = await getPool().connect();

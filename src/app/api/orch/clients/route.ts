@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
+import { normClientName } from "@/lib/bison/match-campaign";
 
 // Orchestrator clients (orch_clients — the source of truth, written by Masterinbox and other
 // apps) + how many agents were built for each (orch_client_leads). Feeds the "Client" filter
@@ -71,14 +72,36 @@ export async function POST(req: NextRequest) {
   if (!name) return NextResponse.json({ error: "Client name is required" }, { status: 400 });
 
   const pool = getPool();
-  const { rows: dupes } = await pool.query(
-    `select client_name from orch_clients
-      where regexp_replace(lower(client_name), '[^a-z0-9]', '', 'g') = regexp_replace(lower($1), '[^a-z0-9]', '', 'g')
-      limit 1`,
-    [name]
+  /*
+   * The duplicate check uses THE MATCHER'S normalization, not one of its own.
+   *
+   * It used to normalize in SQL with regexp_replace(lower(name), '[^a-z0-9]', ''),
+   * which is WEAKER than normClientName in two ways: it does not drop "copy of",
+   * and it does not drop a leading "the". So the guard would happily accept a
+   * name that the campaign matcher then sees as the SAME client:
+   *
+   *     existing   "The Keyes Company"   matcher -> keyescompany
+   *     accepted   "Keyes Company"       matcher -> keyescompany   <- collision
+   *
+   * Two clients sharing a normalized name is exactly the tie that makeCampaignMatcher
+   * refuses to guess on, so it returns null for BOTH -- and the 6-hourly sync
+   * silently stops stamping client_id on either one's leads. Measured before this
+   * change: all 46 clients were reachable this way ("Copy of <name>" for every one
+   * of them, plus the bare form for the three starting with "The"), and 36,586 lead
+   * rows sat behind the 18 that have leads. Nothing was broken yet -- no two current
+   * names collide -- so this is preventive, and it rejects nothing that exists today.
+   *
+   * Done in JS against the full list rather than reimplemented in SQL on purpose:
+   * orch_clients is 46 rows, and sharing the matcher's own function is the only way
+   * the two can never drift apart again. A second copy of the rule is what caused this.
+   */
+  const { rows: existing } = await pool.query(`select client_name from orch_clients`);
+  const incoming = normClientName(name);
+  const clash = existing.find(
+    (r: { client_name: string | null }) => normClientName(r.client_name ?? "") === incoming
   );
-  if (dupes.length) {
-    return NextResponse.json({ error: `A client named "${dupes[0].client_name}" already exists` }, { status: 409 });
+  if (clash) {
+    return NextResponse.json({ error: `A client named "${clash.client_name}" already exists` }, { status: 409 });
   }
 
   const { rows } = await pool.query(
