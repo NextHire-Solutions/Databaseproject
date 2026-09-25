@@ -33,8 +33,16 @@ const CACHE_MS = 60_000;
 
 export type Lifecycle = "active" | "paused" | "churned";
 
-/** Same normalisation as the OS feed and the campaign matcher. */
-const norm = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+/**
+ * Same normalisation as the OS feed and the campaign matcher.
+ *
+ * Exported because callers that hold their own client rows must key into the
+ * map the same way; a second spelling of this rule is how the create-path
+ * guard came to accept names the matcher treated as identical.
+ */
+export const lifecycleKey = (name: string): string =>
+  (name ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const norm = lifecycleKey;
 
 interface Cached {
   at: number;

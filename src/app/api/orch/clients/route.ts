@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
 import { normClientName } from "@/lib/bison/match-campaign";
+import { lifecycleKey, loadLifecycle } from "@/lib/clients/lifecycle";
 
 // Orchestrator clients (orch_clients — the source of truth, written by Masterinbox and other
 // apps) + how many agents were built for each (orch_client_leads). Feeds the "Client" filter
@@ -49,8 +50,28 @@ export async function GET(req: NextRequest) {
     pool.query(`select max(fetched_at) as at from bison_campaigns`),
     pool.query(`select count(distinct (client_id, email))::int as total, count(distinct agent_id)::int as matched, max(synced_at) as at from v_client_campaign_leads`),
   ]);
+  /*
+   * The client's LIFECYCLE status, from the OS.
+   *
+   * §8 lists "Client status" AND "Onboarding status" as two separate fields of
+   * the Database view, and until now only the second existed: `c.status` is the
+   * PIPELINE stage (new -> ... -> live -> paused), which answers how far through
+   * onboarding a client is, not whether they are still a client. §11 calls this
+   * out by name -- "especially important in places like the Database ... where
+   * we currently have long client lists without sufficient visibility into
+   * client status".
+   *
+   * Null when the feed cannot be read, and the UI shows nothing rather than
+   * guessing: an unknown status must never render as "active".
+   */
+  const lifecycle = await loadLifecycle();
+  const clients = rows.map((row: Record<string, unknown>) => ({
+    ...row,
+    lifecycle: lifecycle?.get(lifecycleKey(String(row.client_name ?? ""))) ?? null,
+  }));
+
   return NextResponse.json({
-    clients: rows,
+    clients,
     campaignsSyncedAt: sync.rows[0]?.at ?? null,
     bison: { total: bisonTotal.rows[0]?.total ?? 0, matched: bisonTotal.rows[0]?.matched ?? 0, syncedAt: bisonTotal.rows[0]?.at ?? null },
   });

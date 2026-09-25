@@ -20,6 +20,8 @@ interface OrchClientRow {
   bison_leads?: number;
   bison_replied?: number;
   bison_bounced?: number; // C1: bounced leads in this client's campaigns
+  /** Lifecycle status from the OS: active | paused | churned. Null = unknown. */
+  lifecycle?: string | null;
   created_at: string;
 }
 
@@ -27,6 +29,22 @@ const STATUS_TONE: Record<string, string> = {
   leads_built: "bg-green-100 text-green-800",
   onboarding: "bg-blue-100 text-blue-800",
   pending: "bg-neutral-100 text-neutral-700",
+};
+
+/*
+ * The CLIENT lifecycle status, which is a different question from the pipeline
+ * status beside it: that one says how far through onboarding a client is, this
+ * one says whether they are still a client. §8 lists both as fields of this
+ * view and only the pipeline one existed.
+ *
+ * Colours are the document's, not invented here: paused is orange and churned
+ * is red (§11), so a client reads the same way in this list as anywhere else.
+ */
+const LIFECYCLE_TONE: Record<string, string> = {
+  active: "bg-green-100 text-green-800",
+  onboarding: "bg-blue-100 text-blue-800",
+  paused: "bg-orange-100 text-orange-800",
+  churned: "bg-red-100 text-red-800",
 };
 
 // Clients page (route kept at /webhooks) — a view of orch_clients, the shared table the
@@ -146,7 +164,8 @@ export default function ClientsPage() {
           <thead className="border-b border-neutral-200 text-left text-xs font-medium text-neutral-500">
             <tr>
               <th className="px-4 py-3">Client</th>
-              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Client status</th>
+              <th className="px-4 py-3">Onboarding status</th>
               <th className="px-4 py-3">MLS</th>
               <th className="px-4 py-3">Location</th>
               <th className="px-4 py-3 text-right">Leads built</th>
@@ -165,13 +184,13 @@ export default function ClientsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={12} className="py-12 text-center text-neutral-400">
+                <td colSpan={13} className="py-12 text-center text-neutral-400">
                   Loading…
                 </td>
               </tr>
             ) : clients.length === 0 ? (
               <tr>
-                <td colSpan={12} className="py-12 text-center text-neutral-400">
+                <td colSpan={13} className="py-12 text-center text-neutral-400">
                   No clients yet — they appear here automatically once onboarded.
                 </td>
               </tr>
@@ -179,6 +198,17 @@ export default function ClientsPage() {
               clients.map((c) => (
                 <tr key={c.id} className="border-b border-neutral-100">
                   <td className="px-4 py-3 font-medium text-neutral-900">{c.client_name ?? "Unnamed client"}</td>
+                  <td className="px-4 py-3">
+                    {/* Nothing rather than a guess when the feed is unreadable:
+                        an unknown status must never render as "active". */}
+                    {c.lifecycle ? (
+                      <Badge className={LIFECYCLE_TONE[c.lifecycle] ?? "bg-neutral-100 text-neutral-700"}>
+                        {c.lifecycle}
+                      </Badge>
+                    ) : (
+                      <span className="text-neutral-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <Badge className={STATUS_TONE[c.status ?? ""] ?? "bg-neutral-100 text-neutral-700"}>{c.status ?? "—"}</Badge>
                   </td>
