@@ -27,12 +27,23 @@
  *     genuinely reassigns it, rather than silently detaching mid-run.
  *
  * ---------------------------------------------------------------------------
- * CLEARING IS AS IMPORTANT AS SETTING
+ * A LINK IS NEVER REMOVED JUST BECAUSE THE NAME STOPPED MATCHING
  *
- * If a campaign was stamped and no longer matches — renamed, or its client
- * churned and was removed — the stale id must be cleared, or a join by id
- * quietly reports a client that the name no longer supports. `toClear` carries
- * those, and applying a plan writes both halves.
+ * The first version cleared any stamp the matcher could no longer derive. That
+ * is wrong, and the live data shows why: "Douglas Elliman Los Angeles + Nicole
+ * + SOCAL" carries 3,348 leads and matches no client, because the client row is
+ * named "Douglas Elliman LA". Three campaigns and 5,105 leads sit behind that
+ * one spelling. The obvious remedy is to record the link by hand — and a
+ * clear-on-no-match would erase it again within six hours.
+ *
+ * So the matcher may only OVERWRITE a link when it positively identifies a
+ * DIFFERENT client. Silence is not evidence: a name it cannot parse says
+ * nothing about whether the existing link is right. A genuinely wrong link is
+ * cleared by a person, which is one deliberate act rather than a sync quietly
+ * undoing another.
+ *
+ * `toClear` stays in the type because applying a plan must still be able to
+ * express a removal; `planStamps` simply never populates it from a non-match.
  */
 
 export interface CampaignRow {
@@ -52,6 +63,8 @@ export interface StampPlan {
   unchanged: number;
   /** Resolved to no client and were already blank. Not a change, but worth counting. */
   stillUnmatched: number;
+  /** Had a link the matcher could not re-derive, and kept it. */
+  keptUnmatched: number;
 }
 
 /**
@@ -62,7 +75,7 @@ export function planStamps(
   rows: CampaignRow[],
   match: (name: string | null, bisonId: string) => { id: string } | null,
 ): StampPlan {
-  const plan: StampPlan = { toSet: [], toClear: [], unchanged: 0, stillUnmatched: 0 };
+  const plan: StampPlan = { toSet: [], toClear: [], unchanged: 0, stillUnmatched: 0, keptUnmatched: 0 };
 
   for (const row of rows) {
     const client = match(row.name, row.bisonId);
@@ -73,8 +86,12 @@ export function planStamps(
       else plan.unchanged += 1;
       continue;
     }
-    if (want === null) plan.toClear.push(row.bisonId);
-    else plan.toSet.push({ bisonId: row.bisonId, clientId: want });
+    if (want === null) {
+      // Matched nothing, but something is recorded. Leave it: see the note above.
+      plan.keptUnmatched += 1;
+      continue;
+    }
+    plan.toSet.push({ bisonId: row.bisonId, clientId: want });
   }
 
   return plan;
@@ -89,7 +106,8 @@ export function isNoop(plan: StampPlan): boolean {
 export function describePlan(plan: StampPlan): string {
   return (
     `${plan.toSet.length} stamped, ${plan.toClear.length} cleared, ` +
-    `${plan.unchanged} already correct, ${plan.stillUnmatched} still unmatched`
+    `${plan.unchanged} already correct, ${plan.stillUnmatched} still unmatched` +
+    (plan.keptUnmatched ? `, ${plan.keptUnmatched} kept despite no name match` : "")
   );
 }
 
