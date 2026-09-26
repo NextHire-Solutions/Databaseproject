@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { getPool } from "@/lib/db/pool";
 import { makeCampaignMatcher } from "@/lib/bison/match-campaign";
+import { applyStamps, describePlan, isNoop, planStamps } from "@/lib/bison/stamp-campaign-clients";
 import { createClient } from "@/lib/supabase/server";
 import { fetchClientCampaigns, fetchCampaignLeads } from "@/lib/integrations/bison";
 
@@ -90,8 +91,32 @@ async function runLeadSync(pool: any, key: string, base: string) {
     const mapCampaign = (name: string | null, bisonId: string) => matchCampaign(name, bisonId);
 
     const campRows = (await pool.query(
-      "select coalesce(raw->>'id', bison_campaign_id) as bison_id, name from bison_campaigns"
-    )).rows as { bison_id: string; name: string | null }[];
+      "select coalesce(raw->>'id', bison_campaign_id) as bison_id, name, orch_client_id from bison_campaigns"
+    )).rows as { bison_id: string; name: string | null; orch_client_id: string | null }[];
+
+    /*
+     * Record the match as an ID before using it (§19, §14 item 12).
+     *
+     * The loop below resolves every campaign to a client and then throws that
+     * answer away; `bison_campaigns.client_id` has existed since 0008 with an
+     * index on it and has never been written. Stamping it here costs two
+     * statements and makes the link durable, joinable, and — where it fails —
+     * visible as `client_id is null` rather than only as a log line.
+     *
+     * Deliberately BEFORE the lead loop: a campaign whose lead fetch errors
+     * still has a correct client, and the link should not depend on EmailBison
+     * answering. Never fatal — a sync that cannot stamp must still sync leads.
+     */
+    try {
+      const stampPlan = planStamps(
+        campRows.map((c) => ({ bisonId: c.bison_id, name: c.name, clientId: c.orch_client_id })),
+        matchCampaign,
+      );
+      if (!isNoop(stampPlan)) await applyStamps(pool, stampPlan);
+      console.log("campaign client ids:", describePlan(stampPlan));
+    } catch (e) {
+      console.error("campaign id stamping failed (leads still syncing):", e instanceof Error ? e.message : e);
+    }
 
     let leadsTotal = 0, matchedTotal = 0, campaignsSynced = 0;
     const errors: { campaign: string; error: string }[] = [];
