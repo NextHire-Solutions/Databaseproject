@@ -1,11 +1,10 @@
 export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getCaller } from "@/lib/auth/caller";
 import { TopBar } from "@/components/layout/top-bar";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { RoleProvider } from "@/lib/context/role-context";
-import type { UserRole } from "@/types/auth";
 
 function initialsOf(name: string | null, email: string): string {
   if (name && name.trim()) {
@@ -16,27 +15,29 @@ function initialsOf(name: string | null, email: string): string {
 }
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient();
+  // Same resolver the API routes use, so what the screen shows and what the server allows
+  // cannot drift apart.
+  const caller = await getCaller();
+  if (!caller) redirect("/login");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
+  // Deactivated accounts stay logged in but get nothing: every API route refuses them, so
+  // rendering the app would only show a shell of failing requests.
+  if (!caller.active) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#f6f7f9]">
+        <div className="rounded-xl border border-neutral-200 bg-white p-8 text-center">
+          <p className="text-sm font-medium text-neutral-900">This account has been disabled.</p>
+          <p className="mt-1 text-sm text-neutral-500">Contact an administrator to restore access.</p>
+        </div>
+      </div>
+    );
   }
 
-  const { data: profile } = await supabase
-    .from("user_profiles")
-    .select("full_name, role")
-    .eq("id", user.id)
-    .single();
-
-  const role = (profile?.role ?? "viewer") as UserRole;
+  const role = caller.role ?? "viewer";
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <TopBar initials={initialsOf(profile?.full_name ?? null, user.email ?? "?")} email={user.email ?? ""} />
+      <TopBar initials={initialsOf(caller.name, caller.email || "?")} email={caller.email} />
       <div className="flex min-h-0 flex-1">
         <SidebarNav role={role} />
         <RoleProvider role={role}>

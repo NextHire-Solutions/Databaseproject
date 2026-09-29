@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/api/log-audit";
 import { gatherExportRows } from "@/lib/export/gather-rows";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export const maxDuration = 300;
 
@@ -45,11 +45,8 @@ async function resolvePortal(portalClient: string): Promise<{ base: string; clie
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("campaign.send");
+  if (!gate.ok) return gate.response;
 
   const body = await req.json().catch(() => ({}));
   const { portalClient, target, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = body ?? {};
@@ -61,7 +58,7 @@ export async function POST(req: NextRequest) {
 
   let rows: Record<string, unknown>[] = [];
   try {
-    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: user?.id ?? null });
+    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }
@@ -112,7 +109,7 @@ export async function POST(req: NextRequest) {
   const already = payloadRows.length - inserted; // bulk upsert is idempotent — repeats are absorbed
   await logAudit({
     action: "portal_export",
-    performedBy: user.email ?? null,
+    performedBy: gate.user.email ?? null,
     details: `Sent ${inserted} agents to ${portal.clientName}'s portal ${target === "agents" ? "Your Agents" : "DNC"}${already > 0 ? ` — ${already} already there` : ""}`,
     meta: { kind: "portal_export", portalClient: portal.clientName, target, sent: payloadRows.length, inserted, pushScheduled: j.pushScheduled ?? 0 },
   });

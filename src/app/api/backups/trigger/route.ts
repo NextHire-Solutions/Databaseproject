@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export async function POST(request: NextRequest) {
+  const gate = await requirePermission("admin");
+  if (!gate.ok) return gate.response;
+
   const supabase = createAdminClient();
 
   try {

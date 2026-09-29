@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
 import { normClientName } from "@/lib/bison/match-campaign";
 import { lifecycleKey, loadLifecycle } from "@/lib/clients/lifecycle";
+import { requirePermission } from "@/lib/api/require-permission";
+import { CLIENT_LIST } from "@/lib/auth/permissions";
 
 // Orchestrator clients (orch_clients — the source of truth, written by Masterinbox and other
 // apps) + how many agents were built for each (orch_client_leads). Feeds the "Client" filter
@@ -11,11 +12,8 @@ import { lifecycleKey, loadLifecycle } from "@/lib/clients/lifecycle";
 // main-UI Client filter uses this so operators only see clients awaiting review.
 // orch_* tables have no RLS grants for app users, so this reads via the pool behind an auth gate.
 export async function GET(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission(...CLIENT_LIST);
+  if (!gate.ok) return gate.response;
 
   const inReviewOnly = new URL(req.url).searchParams.get("inReview") === "1";
   const pool = getPool();
@@ -82,11 +80,8 @@ export async function GET(req: NextRequest) {
 // Name-only insert; the campaign matcher picks it up on the next sync. Blocks duplicates under
 // the same normalization the matcher uses (case/spacing/punctuation-insensitive).
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("clients");
+  if (!gate.ok) return gate.response;
 
   const body = await req.json().catch(() => ({}));
   const name = typeof body.client_name === "string" ? body.client_name.trim() : "";
@@ -130,7 +125,7 @@ export async function POST(req: NextRequest) {
     [name]
   );
   await pool.query(`insert into audit_logs (action, performed_by, details) values ('client_added', $1, $2)`, [
-    user.email ?? user.id,
+    gate.user.email ?? gate.user.id,
     `Added client "${name}" from the Clients page`,
   ]);
   return NextResponse.json({ client: rows[0] });

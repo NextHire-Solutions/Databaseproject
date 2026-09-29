@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import type { FilterState } from "@/types/filters";
 import type { Lead } from "@/types/database";
 import { buildRpcFilters } from "@/lib/filters/build-rpc-filters";
 import { findCursorForRangeStart } from "@/lib/exports/skip-cursor";
+import { requirePermission } from "@/lib/api/require-permission";
 
 interface ExportPayload {
   filters: FilterState;
@@ -239,10 +239,8 @@ async function processExport(
 }
 
 export async function POST(request: NextRequest) {
-  const serverSupabase = await createClient();
-  const {
-    data: { user },
-  } = await serverSupabase.auth.getUser();
+  const gate = await requirePermission("export");
+  if (!gate.ok) return gate.response;
 
   const adminSupabase = createAdminClient();
 
@@ -276,9 +274,9 @@ export async function POST(request: NextRequest) {
   const { data: job, error: jobError } = await adminSupabase
     .from("export_jobs")
     .insert({
-      requested_by: user?.id ?? null,
+      requested_by: gate.user.id ?? null,
       filters_used: {
-        _meta: { exported_by: user?.email ?? "unknown", export_type: exportType },
+        _meta: { exported_by: gate.user.email ?? "unknown", export_type: exportType },
         ...filters,
       } as unknown as Record<string, unknown>,
       selected_ids: selectedIds ?? null,

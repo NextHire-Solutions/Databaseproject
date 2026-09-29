@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export async function POST(request: NextRequest) {
-  const serverSupabase = await createClient();
-  const { data: { user } } = await serverSupabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const gate = await requirePermission("export");
+  if (!gate.ok) return gate.response;
 
   const body = await request.json();
   const { filters, columnSelection, limit, rangeFrom, rangeTo, action, jobId, rowCount } = body;
@@ -51,10 +48,10 @@ export async function POST(request: NextRequest) {
     const { data: job } = await adminSupabase
       .from("export_jobs")
       .insert({
-        requested_by: user.id,
+        requested_by: gate.user.id,
         filters_used: {
           _meta: {
-            exported_by: user.email ?? "unknown",
+            exported_by: gate.user.email ?? "unknown",
             export_type: "stream",
             rangeFrom: rangeFrom ?? null,
             rangeTo: rangeTo ?? null,

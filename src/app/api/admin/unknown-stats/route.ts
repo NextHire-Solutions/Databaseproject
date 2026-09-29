@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/api/require-permission";
 
 const supabaseAdmin = createSupabaseClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,11 +9,8 @@ const supabaseAdmin = createSupabaseClient(
 
 export async function GET() {
   try {
-    const serverSupabase = await createClient();
-    const { data: { user } } = await serverSupabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requirePermission("admin");
+    if (!gate.ok) return gate.response;
     const { data, error } = await supabaseAdmin.rpc("fn_unknown_lead_stats");
     if (error) throw new Error(error.message);
     return NextResponse.json(data);

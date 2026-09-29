@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
 import { logAudit } from "@/lib/api/log-audit";
 import { gatherExportRows } from "@/lib/export/gather-rows";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export const maxDuration = 300;
 
@@ -13,11 +13,8 @@ export const maxDuration = 300;
 // orchClientId = orch_clients.id (preferred; the shared client table other apps maintain);
 // clientId = legacy clients.id. campaignId = EmailBison numeric id; omit to enrich-only.
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("campaign.send");
+  if (!gate.ok) return gate.response;
 
   const body = await req.json().catch(() => ({}));
   const { orchClientId = null, clientId = null, campaignId = null, campaignName = null, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = body ?? {};
@@ -44,7 +41,7 @@ export async function POST(req: NextRequest) {
   try {
     // randomize: campaign sends sample ACROSS the filtered set rather than taking its
     // highest-volume head (A22 fix). Ignored when specific agents were hand-picked.
-    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: user?.id ?? null, randomize: true });
+    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null, randomize: true });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }
@@ -101,7 +98,7 @@ export async function POST(req: NextRequest) {
         campaignIds.length ? campaignIds : null,
         campaignNamesJoined,
         agentIds.length,
-        user.id,
+        gate.user.id,
         JSON.stringify({ filters, mode, source, selectedCount: Array.isArray(selectedIds) ? selectedIds.length : 0, rangeFrom: rangeFrom ?? null, rangeTo: rangeTo ?? null }),
         sourcePriority,
         mlsScope,
@@ -124,7 +121,7 @@ export async function POST(req: NextRequest) {
 
   await logAudit({
     action: "enrichment_send",
-    performedBy: user.email ?? null,
+    performedBy: gate.user.email ?? null,
     details: `Queued ${agentIds.length} agents for enrichment${campaignNamesJoined ? ` -> ${campaignIds.length} EmailBison campaign${campaignIds.length > 1 ? "s" : ""} (${campaignNamesJoined})` : " (enrich only)"}`,
     meta: { kind: "enrichment_send", batchId, clientId, orchClientId: orchClientIdForBatch, campaignId: firstCampaignId, campaignIds, campaignName: campaignNamesJoined, source },
   });

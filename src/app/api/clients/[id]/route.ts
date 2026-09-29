@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const gate = await requirePermission("clients");
+  if (!gate.ok) return gate.response;
+
   const { id } = await params;
   const supabase = await createClient();
   const body = await req.json().catch(() => ({}));
@@ -17,6 +21,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const gate = await requirePermission("clients");
+  if (!gate.ok) return gate.response;
+
   const { id } = await params;
   const supabase = await createClient();
   const { error } = await supabase.from("clients").delete().eq("id", id);

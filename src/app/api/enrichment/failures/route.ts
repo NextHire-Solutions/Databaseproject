@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
+import { requirePermission } from "@/lib/api/require-permission";
 
 interface StepEntry {
   step: string;
@@ -23,11 +23,8 @@ function prettyReason(step: string, note: string): string {
 
 // Failed items of a batch, with human-readable reasons — feeds the Export page failure viewer.
 export async function GET(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("export");
+  if (!gate.ok) return gate.response;
 
   const batchId = new URL(req.url).searchParams.get("batchId");
   if (!batchId) return NextResponse.json({ error: "batchId required" }, { status: 400 });

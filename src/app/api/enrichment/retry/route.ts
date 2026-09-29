@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
 import { logAudit } from "@/lib/api/log-audit";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // Re-queue ONLY the failed items of an enrichment batch. Items that already have an email
 // go back to 'enriched' (straight to the push stage — never re-enriched, never re-paid);
 // items that failed during enrichment go back to 'pending'. Successes are never re-sent.
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("campaign.send");
+  if (!gate.ok) return gate.response;
 
   const body = await req.json().catch(() => ({}));
   const batchId: string = body?.batchId ?? "";
@@ -33,7 +30,7 @@ export async function POST(req: NextRequest) {
     );
     await logAudit({
       action: "enrichment_retry",
-      performedBy: user.email ?? null,
+      performedBy: gate.user.email ?? null,
       details: `Re-queued ${rows.length} failed items of enrichment batch ${batchId}`,
       meta: { kind: "enrichment_retry", batchId, retried: rows.length },
     });

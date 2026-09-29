@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // The client dropdown for portal sends. Proxies the portal's admin directory
 // (GET {portal}/api/clients/portals, x-admin-token) and returns ONLY names + enabled —
@@ -7,11 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 const PORTAL_BASE = process.env.PORTAL_BASE_URL || "https://portal.brokerstaffer.com";
 
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("campaign.send");
+  if (!gate.ok) return gate.response;
 
   if (!process.env.PORTAL_ADMIN_TOKEN) {
     return NextResponse.json({ error: "PORTAL_ADMIN_TOKEN is not configured" }, { status: 500 });

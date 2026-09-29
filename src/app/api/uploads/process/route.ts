@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeRow, type FieldMapping } from "@/lib/uploads/normalize-row";
 import Papa from "papaparse";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export const maxDuration = 300;
 
@@ -18,11 +19,8 @@ const CHUNK_SIZE = 500;
 export async function POST(request: NextRequest) {
   // Auth check
   const { createClient: createServerClient } = await import("@/lib/supabase/server");
-  const serverSupabase = await createServerClient();
-  const { data: { user } } = await serverSupabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const gate = await requirePermission("import");
+  if (!gate.ok) return gate.response;
 
   const supabase = createAdminClient();
 

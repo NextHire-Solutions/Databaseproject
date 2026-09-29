@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requirePermission } from "@/lib/api/require-permission";
+import { sanitizeSavedViews } from "@/lib/filters/sanitize-saved-views";
 
 // Typeahead options for the Location / Office Search / MLS filters.
 // Location options come back as objects {v, n, var} with live totals (precomputed
@@ -12,6 +14,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(req: NextRequest) {
+  const gate = await requirePermission("search");
+  if (!gate.ok) return gate.response;
+
   const { searchParams } = new URL(req.url);
   const type = searchParams.get("type") ?? "";
   const field = searchParams.get("field");
@@ -48,13 +53,20 @@ export async function GET(req: NextRequest) {
 // city list to Miami), serves the precomputed lists when nothing else narrows or when the set
 // is still most of the database, and only aggregates live in between.
 export async function POST(req: NextRequest) {
+  const gate = await requirePermission("search");
+  if (!gate.ok) return gate.response;
+
   const body = await req.json().catch(() => ({}));
   const type = typeof body?.type === "string" ? body.type : "";
   const field = typeof body?.field === "string" ? body.field : null;
   const q = typeof body?.q === "string" ? body.q : "";
   const scope = body?.scope === "office" ? "office" : "agent";
   const source = ["all", "courted", "zillow_realtor"].includes(body?.source) ? body.source : "all";
-  const filters = body?.filters && typeof body.filters === "object" ? body.filters : {};
+  const rawFilters = body?.filters && typeof body.filters === "object" ? body.filters : {};
+  // fn_facet_options feeds the payload to fn_agent_where, which resolves saved-view references
+  // under SECURITY DEFINER — so this route needs the same A12 gate as /api/search/filter.
+  // Without it, any session could read facet lists scoped to someone else's private view.
+  const filters = await sanitizeSavedViews(rawFilters, gate.user.id);
 
   const admin = createAdminClient();
   // Office/Brand views run on fn_office_where, which fn_facet_options does not cover, so they

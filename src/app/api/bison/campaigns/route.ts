@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { makeCampaignMatcher } from "@/lib/bison/match-campaign";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // Campaigns for one or more clients. All clients share one EmailBison workspace, so campaigns
 // are associated by NAME ("Client Name + Sender + Market") using the SHARED matcher in
@@ -19,6 +20,9 @@ import { makeCampaignMatcher } from "@/lib/bison/match-campaign";
 // Response: { campaigns: [{ id, bison_campaign_id, bison_id, name, status, is_default,
 //                           client_id, client_name }] }
 export async function GET(req: NextRequest) {
+  const gate = await requirePermission("campaign.send", "clients");
+  if (!gate.ok) return gate.response;
+
   const url = new URL(req.url);
   const orchClientIds = (url.searchParams.get("orchClientIds") ?? "")
     .split(",")

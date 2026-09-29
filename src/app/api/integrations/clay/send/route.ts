@@ -1,20 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/api/log-audit";
 import { orderedKeys } from "@/lib/export/columns";
 import { gatherExportRows } from "@/lib/export/gather-rows";
 import { sendRowsToClay, statusNote } from "@/lib/integrations/clay-send";
+import { createClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export const maxDuration = 300;
 
 // Export -> Send to Clay: post the filtered (or selected) agents to a client's Clay webhook.
 // Body: { clientId, campaignId?, campaignName?, mode?, source?, filters?, selectedIds?, rangeFrom?, rangeTo? }
 export async function POST(req: NextRequest) {
+  const gate = await requirePermission("campaign.send");
+  if (!gate.ok) return gate.response;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
   const { clientId, campaignId = null, campaignName = null, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo, columns } = body ?? {};
@@ -29,7 +28,7 @@ export async function POST(req: NextRequest) {
   // ---- gather AGENT rows (Office mode -> every agent in the chosen offices) ----
   let rows: Record<string, unknown>[] = [];
   try {
-    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: user?.id ?? null });
+    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }
@@ -46,7 +45,7 @@ export async function POST(req: NextRequest) {
   if (sent === 0) {
     await logAudit({
       action: "clay_send",
-      performedBy: user.email ?? null,
+      performedBy: gate.user.email ?? null,
       details: `Sent 0 agents to ${client.name}'s Clay — all ${failed} failed${note}`,
       meta,
     });
@@ -55,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   await logAudit({
     action: "clay_send",
-    performedBy: user.email ?? null,
+    performedBy: gate.user.email ?? null,
     details: `Sent ${sent} agents (one row each) to ${client.name}'s Clay${campaignName ? ` (campaign: ${campaignName})` : ""}${failed ? ` — ${failed} failed${note}` : ""}`,
     meta,
   });

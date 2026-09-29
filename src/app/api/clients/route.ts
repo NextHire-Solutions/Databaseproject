@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // List clients (Bison key masked) + create a client. RLS: read = authenticated, write = manager+.
 export async function GET() {
+  const gate = await requirePermission("clients");
+  if (!gate.ok) return gate.response;
+
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("clients")
@@ -20,6 +24,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const gate = await requirePermission("clients");
+  if (!gate.ok) return gate.response;
+
   const supabase = await createClient();
   const body = await req.json().catch(() => ({}));
   const name: string = (body?.name ?? "").trim();

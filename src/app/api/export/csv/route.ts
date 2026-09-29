@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/api/log-audit";
 import { EXPORT_COLUMNS, EXPORT_VALUE, orderedKeys } from "@/lib/export/columns";
 import { gatherExportRows } from "@/lib/export/gather-rows";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export const maxDuration = 300;
 
@@ -15,11 +15,8 @@ const esc = (v: unknown) => {
 };
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("export");
+  if (!gate.ok) return gate.response;
 
   const body = await req.json().catch(() => ({}));
   const { mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo, columns } = body ?? {};
@@ -28,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   let rows: Row[] = [];
   try {
-    rows = (await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: user?.id ?? null })) as Row[];
+    rows = (await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null })) as Row[];
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }
@@ -39,7 +36,7 @@ export async function POST(req: NextRequest) {
   const lines = rows.map((r) => keys.map((k) => esc(EXPORT_VALUE[k]?.(r))).join(","));
   const csv = [header, ...lines].join("\r\n");
 
-  await logAudit({ action: "csv_export", performedBy: user.email ?? null, details: `Exported ${rows.length} agents to CSV (${keys.length} cols)` });
+  await logAudit({ action: "csv_export", performedBy: gate.user.email ?? null, details: `Exported ${rows.length} agents to CSV (${keys.length} cols)` });
 
   return new NextResponse(csv, {
     headers: {

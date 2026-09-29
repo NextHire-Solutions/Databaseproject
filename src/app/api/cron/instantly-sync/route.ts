@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { getPool } from "@/lib/db/pool";
-import { createClient } from "@/lib/supabase/server";
 import { fetchCampaigns, fetchRepliedLeads, fetchBouncedLeads, fetchAllLeads } from "@/lib/integrations/instantly";
 import { makeCampaignMatcher, instantlyPrefix } from "@/lib/bison/match-campaign";
 import { logAudit } from "@/lib/api/log-audit";
+import { getCaller, callerCan } from "@/lib/auth/caller";
 
 export const maxDuration = 300;
 
@@ -238,10 +238,8 @@ async function runSync(key: string): Promise<void> {
 async function handle(req: NextRequest) {
   let ok = authorized(req);
   if (!ok) {
-    // fallback: any logged-in user, so a manual "Sync" button works from the app
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    ok = !!user;
+    // fallback: the manual "Sync" button on the Clients page — gated by that page's permission
+    ok = callerCan(await getCaller(), ["clients"]);
   }
   if (!ok) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 

@@ -1,18 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/api/log-audit";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export async function POST(request: NextRequest) {
+  // Owner only. This route had NO check at all — any logged-in account could change any
+  // non-owner's role, including promoting itself to admin. Who-may-do-what is the owner's
+  // lever, so it is held stricter than the rest of the Admin page.
+  const gate = await requirePermission("admin");
+  if (!gate.ok) return gate.response;
+  if (gate.user.role !== "owner") {
+    return NextResponse.json({ error: "Only the owner can change roles." }, { status: 403 });
+  }
+
   const supabase = createAdminClient();
 
-  let body: { userId: string; newRole: string; performedBy?: string };
+  let body: { userId: string; newRole: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { userId, newRole, performedBy } = body;
+  const { userId, newRole } = body;
   if (!userId || !newRole) {
     return NextResponse.json({ error: "userId and newRole required" }, { status: 400 });
   }
@@ -48,7 +58,7 @@ export async function POST(request: NextRequest) {
 
   await logAudit({
     action: "Role Changed",
-    performedBy,
+    performedBy: gate.user.email, // the actual caller — never trusted from the request body
     details: `${profile.email}: ${profile.role} → ${newRole}`,
   });
 

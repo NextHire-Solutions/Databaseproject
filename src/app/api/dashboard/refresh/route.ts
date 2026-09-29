@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPool } from "@/lib/db/pool";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // fn_dashboard_stats does a full GROUP BY across 19M leads. Under post-upgrade
 // load (cache-cold, autovacuum) it can run 60-180s — past the Supabase HTTP
@@ -9,6 +10,9 @@ import { getPool } from "@/lib/db/pool";
 export const maxDuration = 300;
 
 export async function POST() {
+  const gate = await requirePermission("admin");
+  if (!gate.ok) return gate.response;
+
   const supabase = createAdminClient();
   const today = new Date().toISOString().split("T")[0];
 

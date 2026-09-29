@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
-import { createClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // Recent scraper ingests + current data totals, for the Import page.
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ rows: [], counts: null });
+  const gate = await requirePermission("import");
+  if (!gate.ok) return gate.response;
 
   const pool = getPool();
   const { rows } = await pool.query(

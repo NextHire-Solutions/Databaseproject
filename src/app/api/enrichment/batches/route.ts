@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // Recent enrichment batches with live counters — feeds the Admin -> Activity progress panel.
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("export");
+  if (!gate.ok) return gate.response;
 
   const { rows } = await getPool().query(
     `select b.id, b.status, b.campaign_id, b.campaign_name, b.total, b.enriched, b.no_email,

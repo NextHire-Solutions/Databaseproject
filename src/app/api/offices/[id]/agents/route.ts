@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
-import { createClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // Agents that belong to one office (paginated) — for the office profile panel.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("search");
+  if (!gate.ok) return gate.response;
 
   const { id } = await params;
   const sp = new URL(req.url).searchParams;

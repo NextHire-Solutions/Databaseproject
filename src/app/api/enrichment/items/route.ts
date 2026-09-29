@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // Per-lead enrichment detail for one batch — feeds the Export page's Clay-style drill-down:
 // lead name, the email the pipeline found, its verification status/provider, the final
 // outcome, and the full step_log trail (each find/verify step with ok/ms/note) as the
 // verification result payload.
 export async function GET(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("export");
+  if (!gate.ok) return gate.response;
 
   const batchId = req.nextUrl.searchParams.get("batchId") ?? "";
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(batchId)) {

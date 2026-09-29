@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/api/log-audit";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export async function POST(request: NextRequest) {
+  // Admin-only: this used to be open to any logged-in user, who could fire a reset email at any
+  // account and put whatever name they liked in the audit log (performedBy came from the body).
+  const gate = await requirePermission("admin");
+  if (!gate.ok) return gate.response;
+
   const supabase = createAdminClient();
 
-  let body: { userId: string; performedBy?: string };
+  let body: { userId: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { userId, performedBy } = body;
+  const { userId } = body;
   if (!userId) {
     return NextResponse.json({ error: "userId required" }, { status: 400 });
   }
@@ -64,7 +70,7 @@ export async function POST(request: NextRequest) {
 
   await logAudit({
     action: "Password Reset",
-    performedBy,
+    performedBy: gate.user.email, // who is actually logged in — never taken from the request body
     details: `User Email: ${profile.email}`,
   });
 

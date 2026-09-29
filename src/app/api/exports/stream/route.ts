@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import type { FilterState } from "@/types/filters";
 import type { Lead } from "@/types/database";
 import { buildRpcFilters } from "@/lib/filters/build-rpc-filters";
 import { findCursorForRangeStart } from "@/lib/exports/skip-cursor";
 import { getPool } from "@/lib/db/pool";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // Kept for the auth/markJobError path. The actual export RPC calls go through
 // the direct pg pool below to bypass the Supabase HTTP gateway (~60s timeout).
@@ -28,11 +28,8 @@ function escapeCsv(val: unknown): string {
 export const maxDuration = 600; // 10 min max for streaming
 
 export async function POST(request: NextRequest) {
-  const serverSupabase = await createClient();
-  const { data: { user } } = await serverSupabase.auth.getUser();
-  if (!user) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const gate = await requirePermission("export");
+  if (!gate.ok) return gate.response;
 
   const body = await request.json();
   const { filters, columnSelection, limit, rangeFrom, rangeTo, jobId } = body as {

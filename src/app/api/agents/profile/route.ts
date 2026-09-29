@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // A5: agent profile — identity + combined production + the per-MLS breakdown.
 // mls rows join three sources: membership (agent_mls), that MLS's own production
 // numbers (agent_mls_stats — fills as the 15-day refresh cycles run through the
 // fixed ingest; null until that MLS re-scrapes), and the MLS's bulk-refresh date.
 export async function GET(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("search");
+  if (!gate.ok) return gate.response;
 
   const id = new URL(req.url).searchParams.get("id") ?? "";
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
@@ -62,11 +59,8 @@ export async function GET(req: NextRequest) {
 // number). NEVER overwrites existing values — stored as its own 'agent_provided' source,
 // which campaign sends prefer over every scraped/enriched value.
 export async function PATCH(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("agents.edit");
+  if (!gate.ok) return gate.response;
 
   const body = await req.json().catch(() => ({}));
   const id = typeof body.id === "string" ? body.id : "";
@@ -90,11 +84,11 @@ export async function PATCH(req: NextRequest) {
     );
     const { rows, rowCount } = await pool.query(
       `select fn_set_manual_titles($1::uuid, $2::text[], $3) as title`,
-      [id, titles, user.email ?? user.id]
+      [id, titles, gate.user.email ?? gate.user.id]
     );
     if (!rowCount) return NextResponse.json({ error: "not found" }, { status: 404 });
     await pool.query(`insert into audit_logs (action, performed_by, details) values ('agent_title_tagged', $1, $2)`, [
-      user.email ?? user.id,
+      gate.user.email ?? gate.user.id,
       `Agent ${id}: manual title tags = ${titles.length ? titles.join(", ") : "(cleared)"}`,
     ]);
     return NextResponse.json({ ok: true, title: rows[0]?.title ?? null, manual_titles: titles });
@@ -109,13 +103,13 @@ export async function PATCH(req: NextRequest) {
     );
     if (!rowCount) return NextResponse.json({ error: "not found" }, { status: 404 });
     await pool.query(`insert into audit_logs (action, performed_by, details) values ('agent_contact_added', $1, $2)`, [
-      user.email ?? user.id,
+      gate.user.email ?? gate.user.id,
       `Agent ${id}: removed agent-provided contact info`,
     ]);
     return NextResponse.json({ ok: true, agent_provided: null });
   }
 
-  const provided: Record<string, string> = { added_by: user.email ?? user.id, added_at: new Date().toISOString() };
+  const provided: Record<string, string> = { added_by: gate.user.email ?? gate.user.id, added_at: new Date().toISOString() };
   if (email) provided.email = email;
   if (phone) provided.phone = phone;
   const { rowCount } = await pool.query(
@@ -127,7 +121,7 @@ export async function PATCH(req: NextRequest) {
   );
   if (!rowCount) return NextResponse.json({ error: "not found" }, { status: 404 });
   await pool.query(`insert into audit_logs (action, performed_by, details) values ('agent_contact_added', $1, $2)`, [
-    user.email ?? user.id,
+    gate.user.email ?? gate.user.id,
     `Agent ${id}: set agent-provided ${[email && "email", phone && "phone"].filter(Boolean).join(" + ")}`,
   ]);
   return NextResponse.json({ ok: true, agent_provided: provided });

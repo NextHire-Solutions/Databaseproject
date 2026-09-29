@@ -3,8 +3,8 @@ import { timingSafeEqual } from "node:crypto";
 import { getPool } from "@/lib/db/pool";
 import { makeCampaignMatcher } from "@/lib/bison/match-campaign";
 import { applyStamps, describePlan, isNoop, planStamps } from "@/lib/bison/stamp-campaign-clients";
-import { createClient } from "@/lib/supabase/server";
 import { fetchClientCampaigns, fetchCampaignLeads } from "@/lib/integrations/bison";
+import { getCaller, callerCan } from "@/lib/auth/caller";
 
 export const maxDuration = 300;
 
@@ -12,12 +12,10 @@ async function authorized(req: NextRequest): Promise<boolean> {
   const token = req.headers.get("x-cron-token") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   const expect = process.env.CRON_TOKEN ?? "";
   if (expect && token.length === expect.length && timingSafeEqual(Buffer.from(token), Buffer.from(expect))) return true;
-  // Otherwise allow a logged-in user (the "Sync" button on the Webhooks page).
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return !!user;
+  // Otherwise the "Sync" button on the Clients page — which that page's permission covers.
+  // "Any logged-in user" was too wide once non-admin logins exist.
+  const caller = await getCaller();
+  return callerCan(caller, ["clients"]);
 }
 
 async function handle(req: NextRequest) {

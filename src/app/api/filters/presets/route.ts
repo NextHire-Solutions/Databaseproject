@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requirePermission } from "@/lib/api/require-permission";
 
 // GET /api/filters/presets — List user's presets + shared presets
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const gate = await requirePermission("views");
+  if (!gate.ok) return gate.response;
 
   const admin = createAdminClient();
 
   const { data, error } = await admin
     .from("filter_presets")
     .select("*")
-    .or(`user_id.eq.${user?.id ?? ""},is_shared.eq.true`)
+    .or(`user_id.eq.${gate.user.id ?? ""},is_shared.eq.true`)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -26,14 +24,8 @@ export async function GET() {
 
 // POST /api/filters/presets — Create a new preset
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const gate = await requirePermission("views");
+  if (!gate.ok) return gate.response;
 
   let body: { name: string; filters: Record<string, unknown>; is_shared?: boolean };
   try {
@@ -50,7 +42,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await admin
     .from("filter_presets")
     .insert({
-      user_id: user.id,
+      user_id: gate.user.id,
       name: body.name.trim(),
       filters: body.filters,
       is_shared: body.is_shared ?? false,
@@ -67,14 +59,8 @@ export async function POST(request: NextRequest) {
 
 // DELETE /api/filters/presets — Delete a preset
 export async function DELETE(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const gate = await requirePermission("views");
+  if (!gate.ok) return gate.response;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -88,7 +74,7 @@ export async function DELETE(request: NextRequest) {
     .from("filter_presets")
     .delete()
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("user_id", gate.user.id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

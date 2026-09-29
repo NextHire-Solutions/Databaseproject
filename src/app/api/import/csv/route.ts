@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db/pool";
 import { upsertAgentRows } from "@/lib/ingest/upsert-agents";
 import { logAudit } from "@/lib/api/log-audit";
 import { isChurned } from "@/lib/clients/lifecycle";
+import { requirePermission } from "@/lib/api/require-permission";
 
 export const maxDuration = 300;
 
@@ -17,11 +17,8 @@ export const maxDuration = 300;
 const MAX_ROWS = 2000;
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requirePermission("import");
+  if (!gate.ok) return gate.response;
 
   const body = await req.json().catch(() => null);
   const source = ["courted", "zillow", "realtor"].includes(body?.source) ? (body.source as string) : "courted";
@@ -79,7 +76,7 @@ export async function POST(req: NextRequest) {
     }
     await logAudit({
       action: "ingest",
-      performedBy: user.email ?? null,
+      performedBy: gate.user.email ?? null,
       details: `CSV import${fileName ? ` "${fileName}"` : ""}${chunkInfo} — ${source}: received ${rows.length} — ${JSON.stringify(result)}${clientName ? ` — linked ${linked} to ${clientName}` : ""}`,
       meta: { kind: "csv_import", fileName, source, received: rows.length, orchClientId, linked, ...result },
     });

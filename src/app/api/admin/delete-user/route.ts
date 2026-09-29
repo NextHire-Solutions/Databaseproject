@@ -24,14 +24,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Only owners and admins can delete users" }, { status: 403 });
   }
 
-  let body: { userId: string; performedBy?: string };
+  let body: { userId: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { userId, performedBy } = body;
+  const { userId } = body;
   if (!userId) {
     return NextResponse.json({ error: "userId required" }, { status: 400 });
   }
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 
   await logAudit({
     action: "User Deleted",
-    performedBy,
+    performedBy: user.email ?? user.id, // the checked caller, not the request body
     details: `User Email: ${profile?.email ?? userId}`,
   });
 
