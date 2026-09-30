@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { makeCampaignMatcher } from "@/lib/bison/match-campaign";
 import { requirePermission } from "@/lib/api/require-permission";
+import { allowedClientIds } from "@/lib/auth/client-access";
 
 // Campaigns for one or more clients. All clients share one EmailBison workspace, so campaigns
 // are associated by NAME ("Client Name + Sender + Market") using the SHARED matcher in
@@ -32,15 +33,26 @@ export async function GET(req: NextRequest) {
   const clientId = url.searchParams.get("clientId");
   if (orchClientId && !orchClientIds.includes(orchClientId)) orchClientIds.push(orchClientId);
 
+  // 0124: a client-restricted account may only ask about its allowed clients. Off-limits ids
+  // are dropped (so the response simply has no campaigns for them), and the legacy clients.id
+  // path is refused outright — it bypasses the orch client list the restriction is defined on.
+  const allowed = await allowedClientIds(gate.user);
+  let requested = orchClientIds;
+  if (allowed !== null) {
+    const ok = new Set(allowed);
+    requested = orchClientIds.filter((id) => ok.has(id));
+    if (clientId) return NextResponse.json({ error: "Not available for this account." }, { status: 403 });
+  }
+
   const pool = getPool();
 
   // Which clients did the caller ask for?
   let wanted: { id: string; client_name: string | null; bison_campaign_id: string | null }[] = [];
-  if (orchClientIds.length) {
+  if (requested.length) {
     wanted = (
       await pool.query(
         "select id, client_name, bison_campaign_id from orch_clients where id = any($1::uuid[])",
-        [orchClientIds]
+        [requested]
       )
     ).rows;
   } else if (clientId) {

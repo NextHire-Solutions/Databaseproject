@@ -4,6 +4,7 @@ import { normClientName } from "@/lib/bison/match-campaign";
 import { lifecycleKey, loadLifecycle } from "@/lib/clients/lifecycle";
 import { requirePermission } from "@/lib/api/require-permission";
 import { CLIENT_LIST } from "@/lib/auth/permissions";
+import { allowedClientIds } from "@/lib/auth/client-access";
 
 // Orchestrator clients (orch_clients — the source of truth, written by Masterinbox and other
 // apps) + how many agents were built for each (orch_client_leads). Feeds the "Client" filter
@@ -16,6 +17,13 @@ export async function GET(req: NextRequest) {
   if (!gate.ok) return gate.response;
 
   const inReviewOnly = new URL(req.url).searchParams.get("inReview") === "1";
+  // 0124: an account the owner limited to specific clients gets only those rows — this list
+  // feeds every client picker in the app, so trimming it here trims them all.
+  const allowed = await allowedClientIds(gate.user);
+  const where = [
+    inReviewOnly ? "c.leads_inreview = true" : null,
+    allowed !== null ? "c.id = any($1::uuid[])" : null,
+  ].filter(Boolean);
   const pool = getPool();
   const [{ rows }, sync, bisonTotal] = await Promise.all([
     pool.query(
@@ -41,9 +49,10 @@ export async function GET(req: NextRequest) {
               (select count(distinct b.email) from v_client_campaign_leads b where b.client_id = c.id and b.bounced)::int as bison_bounced
          from orch_clients c
          left join orch_client_leads l on l.client_id = c.id
-        ${inReviewOnly ? "where c.leads_inreview = true" : ""}
+        ${where.length ? `where ${where.join(" and ")}` : ""}
         group by c.id
-        order by c.client_name nulls last`
+        order by c.client_name nulls last`,
+      allowed !== null ? [allowed] : []
     ),
     pool.query(`select max(fetched_at) as at from bison_campaigns`),
     pool.query(`select count(distinct (client_id, email))::int as total, count(distinct agent_id)::int as matched, max(synced_at) as at from v_client_campaign_leads`),

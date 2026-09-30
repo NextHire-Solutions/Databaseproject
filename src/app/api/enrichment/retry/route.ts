@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { logAudit } from "@/lib/api/log-audit";
 import { requirePermission } from "@/lib/api/require-permission";
+import { allowedClientIds } from "@/lib/auth/client-access";
 
 // Re-queue ONLY the failed items of an enrichment batch. Items that already have an email
 // go back to 'enriched' (straight to the push stage — never re-enriched, never re-paid);
@@ -15,6 +16,17 @@ export async function POST(req: NextRequest) {
   if (!batchId) return NextResponse.json({ error: "batchId required" }, { status: 400 });
 
   const pool = getPool();
+
+  // 0124: a client-restricted account may only retry batches of its allowed clients.
+  const allowed = await allowedClientIds(gate.user);
+  if (allowed !== null) {
+    const { rows: b } = await pool.query(`select orch_client_id from enrichment_batches where id = $1`, [batchId]);
+    const ownerId = b[0]?.orch_client_id as string | null | undefined;
+    if (!ownerId || !allowed.includes(ownerId)) {
+      return NextResponse.json({ error: "You don't have access to this batch." }, { status: 403 });
+    }
+  }
+
   const { rows } = await pool.query(
     `update enrichment_items
         set status = case when email is not null then 'enriched' else 'pending' end,

@@ -82,6 +82,9 @@ export async function POST(request: NextRequest) {
         full_name: name ?? null,
         role,
         is_active: true,
+        // 0124, fail-closed: a new manager/viewer sees NO clients until the owner ticks some
+        // (Admin -> Users -> Clients). Owner/admin are always unrestricted.
+        client_access: ["owner", "admin"].includes(role) ? "all" : "selected",
       },
       { onConflict: "id" }
     );

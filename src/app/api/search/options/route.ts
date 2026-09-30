@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requirePermission } from "@/lib/api/require-permission";
 import { sanitizeSavedViews } from "@/lib/filters/sanitize-saved-views";
+import { allowedClientIds, restrictClientFilter } from "@/lib/auth/client-access";
 
 // Typeahead options for the Location / Office Search / MLS filters.
 // Location options come back as objects {v, n, var} with live totals (precomputed
@@ -66,7 +67,11 @@ export async function POST(req: NextRequest) {
   // fn_facet_options feeds the payload to fn_agent_where, which resolves saved-view references
   // under SECURITY DEFINER — so this route needs the same A12 gate as /api/search/filter.
   // Without it, any session could read facet lists scoped to someone else's private view.
-  const filters = await sanitizeSavedViews(rawFilters, gate.user.id);
+  // Client references likewise (0124).
+  const filters = restrictClientFilter(
+    await sanitizeSavedViews(rawFilters, gate.user.id),
+    await allowedClientIds(gate.user)
+  );
 
   const admin = createAdminClient();
   // Office/Brand views run on fn_office_where, which fn_facet_options does not cover, so they

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/api/require-permission";
+import { allowedClientIds, restrictClientFilter } from "@/lib/auth/client-access";
 
 // Saved views (quick-filters): the user's saved filter selections.
 // B4: each row carries its cached agent count (cached_count/cached_at — refreshed on
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
     .insert({
       user_id: gate.user.id,
       name,
-      filters: body?.filters ?? {},
+      filters: restrictClientFilter((body?.filters ?? {}) as Record<string, unknown>, await allowedClientIds(gate.user)),
       mode: body?.mode ?? "agent",
       source_mode: body?.source ?? "courted",
     })

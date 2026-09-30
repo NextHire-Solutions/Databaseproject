@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requirePermission } from "@/lib/api/require-permission";
 import { sanitizeSavedViews } from "@/lib/filters/sanitize-saved-views";
+import { allowedClientIds, restrictClientFilter } from "@/lib/auth/client-access";
 
 // Agent/Office search. Calls fn_filter_search (SECURITY DEFINER) -> { data, totalCount, salesVolumeTotal }.
 export async function POST(req: NextRequest) {
@@ -29,8 +30,12 @@ export async function POST(req: NextRequest) {
     // saved-view include/exclude references are permission-gated to the caller's own/shared
     // views before they reach the SECURITY DEFINER RPC. Zero-cost when none are referenced
     // (the common case — sanitizeSavedViews returns immediately), and the caller identity
-    // comes from the gate above rather than a second auth round-trip.
-    const effFilters = await sanitizeSavedViews(filters, gate.user.id);
+    // comes from the gate above rather than a second auth round-trip. Client references get
+    // the same treatment for accounts the owner limited to specific clients (0124).
+    const effFilters = restrictClientFilter(
+      await sanitizeSavedViews(filters, gate.user.id),
+      await allowedClientIds(gate.user)
+    );
 
     const admin = createAdminClient();
     const { data, error } = await admin.rpc("fn_filter_search", {

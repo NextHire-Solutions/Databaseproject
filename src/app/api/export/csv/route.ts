@@ -3,6 +3,7 @@ import { logAudit } from "@/lib/api/log-audit";
 import { EXPORT_COLUMNS, EXPORT_VALUE, orderedKeys } from "@/lib/export/columns";
 import { gatherExportRows } from "@/lib/export/gather-rows";
 import { requirePermission } from "@/lib/api/require-permission";
+import { allowedClientIds, restrictClientFilter } from "@/lib/auth/client-access";
 
 export const maxDuration = 300;
 
@@ -25,7 +26,9 @@ export async function POST(req: NextRequest) {
 
   let rows: Row[] = [];
   try {
-    rows = (await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null })) as Row[];
+    // 0124: strip client references the caller isn't allowed before the filter engine sees them
+    const effFilters = restrictClientFilter(filters, await allowedClientIds(gate.user));
+    rows = (await gatherExportRows({ mode, source, filters: effFilters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null })) as Row[];
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }

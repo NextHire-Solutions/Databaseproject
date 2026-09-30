@@ -14,6 +14,7 @@ export type Caller = {
   name: string | null;
   role: UserRole | null; // null = no user_profiles row -> no permissions
   active: boolean; //       false = deactivated -> no permissions
+  clientAccess: "all" | "selected"; // 0124: 'selected' = only the clients in user_client_access
 };
 
 // Verifying a login token is a round-trip to Supabase Auth. Search fires a request per debounced
@@ -44,14 +45,17 @@ export async function getCaller(): Promise<Caller | null> {
   if (!user) return null;
 
   const { rows } = await getPool().query(
-    "select email, full_name, role, is_active from user_profiles where id = $1",
+    "select email, full_name, role, is_active, client_access from user_profiles where id = $1",
     [user.id]
   );
-  const p = rows[0] as { email: string | null; full_name: string | null; role: string; is_active: boolean } | undefined;
+  const p = rows[0] as
+    | { email: string | null; full_name: string | null; role: string; is_active: boolean; client_access: string }
+    | undefined;
   const caller: Caller = {
     id: user.id,
     email: p?.email ?? user.email ?? "",
     name: p?.full_name ?? null,
+    clientAccess: p?.client_access === "selected" ? "selected" : "all",
     role: (p?.role ?? null) as UserRole | null,
     active: p ? p.is_active !== false : false,
   };

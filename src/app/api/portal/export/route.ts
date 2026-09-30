@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { logAudit } from "@/lib/api/log-audit";
 import { gatherExportRows } from "@/lib/export/gather-rows";
 import { requirePermission } from "@/lib/api/require-permission";
+import { allowedClientIds, allowedClientNames, restrictClientFilter } from "@/lib/auth/client-access";
 
 export const maxDuration = 300;
 
@@ -53,12 +54,24 @@ export async function POST(req: NextRequest) {
   if (!portalClient || typeof portalClient !== "string") return NextResponse.json({ error: "portalClient required" }, { status: 400 });
   if (target !== "agents" && target !== "dnc") return NextResponse.json({ error: "target must be 'agents' or 'dnc'" }, { status: 400 });
 
+  // 0124: a client-restricted account may only send to portals of its allowed clients, and
+  // client references inside the filter payload are stripped like everywhere else.
+  const allowed = await allowedClientIds(gate.user);
+  let effFilters = filters as Record<string, unknown>;
+  if (allowed !== null) {
+    const allowedNames = await allowedClientNames(gate.user);
+    if (!allowedNames?.has(String(portalClient).trim().toLowerCase())) {
+      return NextResponse.json({ error: "You don't have access to this client's portal." }, { status: 403 });
+    }
+    effFilters = restrictClientFilter(effFilters, allowed);
+  }
+
   const portal = await resolvePortal(portalClient);
   if ("error" in portal) return NextResponse.json({ error: portal.error }, { status: 400 });
 
   let rows: Record<string, unknown>[] = [];
   try {
-    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null });
+    rows = await gatherExportRows({ mode, source, filters: effFilters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }

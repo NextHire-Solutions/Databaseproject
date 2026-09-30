@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Copy, Check, Plus, Webhook, KeyRound, Users, ScrollText, Landmark } from "lucide-react";
 import { toast } from "sonner";
 import { MlsTab } from "./mls-tab";
+import { useRole } from "@/lib/context/role-context";
 
 const ROLES = ["owner", "admin", "manager", "viewer"];
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
@@ -198,6 +199,128 @@ interface UserRow {
   role: string;
   is_active: boolean;
   created_at: string;
+  client_access: "all" | "selected";
+  client_count: number;
+}
+
+// 0124: which clients a manager/viewer sees. Owner-only to edit (the server refuses anyone
+// else); admins see the state as text. The checklist pre-ticks the user's salesperson
+// assignments the first time "Only selected" is chosen — a suggestion, nothing more.
+function ClientAccessCell({ user, onSaved }: { user: UserRow; onSaved: () => void }) {
+  const isOwner = useRole() === "owner";
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"all" | "selected">(user.client_access);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [clients, setClients] = useState<{ id: string; client_name: string | null }[] | null>(null);
+  const [suggested, setSuggested] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (["owner", "admin"].includes(user.role)) {
+    return <span className="text-xs text-neutral-400">All (always)</span>;
+  }
+
+  const label = user.client_access === "all" ? "All clients" : `${user.client_count} selected`;
+  if (!isOwner) return <span className="text-xs text-neutral-600">{label}</span>;
+
+  async function openDialog() {
+    setOpen(true);
+    setQ("");
+    const [accessRes, clientsRes] = await Promise.all([
+      fetch(`/api/admin/client-access?userId=${user.id}`).then((r) => r.json()),
+      clients === null ? fetch("/api/orch/clients").then((r) => r.json()) : Promise.resolve(null),
+    ]);
+    if (clientsRes) setClients((clientsRes.clients ?? []).filter((c: { client_name: string | null }) => c.client_name));
+    setMode(accessRes.mode === "selected" ? "selected" : "all");
+    setTicked(new Set<string>(accessRes.ids ?? []));
+    setSuggested(accessRes.suggested ?? []);
+  }
+
+  function switchMode(m: "all" | "selected") {
+    setMode(m);
+    // first switch to "selected" with nothing ticked: offer the salesperson's own clients
+    if (m === "selected" && ticked.size === 0 && suggested.length) setTicked(new Set(suggested));
+  }
+
+  async function save() {
+    setBusy(true);
+    const r = await fetch("/api/admin/client-access", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id, mode, ids: mode === "selected" ? [...ticked] : [] }),
+    });
+    const j = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (r.ok) {
+      toast.success(mode === "all" ? "Sees all clients" : `Limited to ${j.count} client${j.count === 1 ? "" : "s"}`);
+      setOpen(false);
+      onSaved();
+    } else toast.error(j.error ?? "Failed to save");
+  }
+
+  const shown = (clients ?? []).filter((c) => (c.client_name ?? "").toLowerCase().includes(q.toLowerCase()));
+
+  return (
+    <>
+      <button type="button" onClick={openDialog} className="text-xs text-blue-700 hover:underline">
+        {label}
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Clients {user.full_name ? `— ${user.full_name}` : user.email ? `— ${user.email}` : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-5 text-sm">
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={mode === "all"} onChange={() => switchMode("all")} /> All clients
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={mode === "selected"} onChange={() => switchMode("selected")} /> Only selected
+            </label>
+          </div>
+          {mode === "selected" && (
+            <div className="space-y-2">
+              <Input placeholder="Search clients…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border border-neutral-200 p-2">
+                {clients === null ? (
+                  <p className="py-4 text-center text-xs text-neutral-400">Loading…</p>
+                ) : shown.length === 0 ? (
+                  <p className="py-4 text-center text-xs text-neutral-400">No clients match</p>
+                ) : (
+                  shown.map((c) => (
+                    <label key={c.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-neutral-50">
+                      <input
+                        type="checkbox"
+                        checked={ticked.has(c.id)}
+                        onChange={() =>
+                          setTicked((s) => {
+                            const n = new Set(s);
+                            if (n.has(c.id)) n.delete(c.id);
+                            else n.add(c.id);
+                            return n;
+                          })
+                        }
+                      />
+                      <span className="truncate">{c.client_name}</span>
+                      {suggested.includes(c.id) && <span className="ml-auto text-[10px] text-neutral-400">their salesperson</span>}
+                    </label>
+                  ))
+                )}
+              </div>
+              <p className="text-[11px] text-neutral-400">
+                {ticked.size === 0 ? "Nothing ticked — this account will see no clients." : `${ticked.size} ticked.`}
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={save} disabled={busy}>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 function UsersTab({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -279,6 +402,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
               <th className="px-3 py-2">Email</th>
               <th className="px-3 py-2">Name</th>
               <th className="px-3 py-2">Role</th>
+              <th className="px-3 py-2">Clients</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2" />
             </tr>
@@ -301,6 +425,9 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
                       ))}
                     </SelectContent>
                   </Select>
+                </td>
+                <td className="px-3 py-2">
+                  <ClientAccessCell user={u} onSaved={load} />
                 </td>
                 <td className="px-3 py-2">
                   {u.is_active ? <Badge className="bg-green-100 text-green-800">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}

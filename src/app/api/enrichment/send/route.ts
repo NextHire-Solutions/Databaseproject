@@ -3,6 +3,7 @@ import { getPool } from "@/lib/db/pool";
 import { logAudit } from "@/lib/api/log-audit";
 import { gatherExportRows } from "@/lib/export/gather-rows";
 import { requirePermission } from "@/lib/api/require-permission";
+import { allowedClientIds, restrictClientFilter } from "@/lib/auth/client-access";
 
 export const maxDuration = 300;
 
@@ -33,7 +34,46 @@ export async function POST(req: NextRequest) {
   const firstCampaignId = campaignIds[0] ?? null;
 
   const orchClientIds: string[] = Array.isArray(body?.orchClientIds) ? body.orchClientIds.filter(Boolean) : [];
-  const f = filters as Record<string, unknown>;
+
+  // 0124: a client-restricted account may only SEND for its allowed clients. Every named target
+  // must be allowed (a send spends credit and pushes into a live campaign, so an off-limits id
+  // is refused loudly, not silently dropped); the legacy clients.id path is refused because the
+  // restriction is defined on orch clients; and client references inside the filter payload are
+  // stripped like everywhere else.
+  const allowed = await allowedClientIds(gate.user);
+  let effFilters = filters as Record<string, unknown>;
+  if (allowed !== null) {
+    const ok = new Set(allowed);
+    const targets = [...orchClientIds, ...(orchClientId ? [String(orchClientId)] : [])];
+    if (targets.some((id) => !ok.has(id))) {
+      return NextResponse.json({ error: "You don't have access to one of the selected clients." }, { status: 403 });
+    }
+    if (clientId) return NextResponse.json({ error: "Not available for this account." }, { status: 403 });
+    effFilters = restrictClientFilter(effFilters, allowed);
+
+    // The target CAMPAIGNS must belong to allowed clients too — the picker only offers those,
+    // but a hand-crafted request could name any campaign id. bison_campaigns.orch_client_id
+    // (stamped by the sync since 0122) is the check; an unstamped campaign is refused for
+    // restricted accounts because its owner is unknown.
+    if (campaignIds.length) {
+      const { rows: camp } = await getPool().query(
+        `select coalesce(raw->>'id', bison_campaign_id) as bid, orch_client_id
+           from bison_campaigns where coalesce(raw->>'id', bison_campaign_id) = any($1::text[])`,
+        [campaignIds]
+      );
+      const byId = new Map(camp.map((c) => [String(c.bid), c.orch_client_id as string | null]));
+      const ok = new Set(allowed);
+      const bad = campaignIds.find((id) => {
+        const ownerId = byId.get(String(id));
+        return !ownerId || !ok.has(ownerId);
+      });
+      if (bad) {
+        return NextResponse.json({ error: "You don't have access to one of the selected campaigns." }, { status: 403 });
+      }
+    }
+  }
+
+  const f = effFilters;
   const filterClientIds = Array.isArray(f?.orchClientIds) ? (f.orchClientIds as string[]) : [];
   const orchClientIdForBatch = orchClientId || orchClientIds[0] || filterClientIds[0] || f?.orchClientId || null;
 
@@ -41,7 +81,7 @@ export async function POST(req: NextRequest) {
   try {
     // randomize: campaign sends sample ACROSS the filtered set rather than taking its
     // highest-volume head (A22 fix). Ignored when specific agents were hand-picked.
-    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null, randomize: true });
+    rows = await gatherExportRows({ mode, source, filters: effFilters, selectedIds, rangeFrom, rangeTo, userId: gate.user.id ?? null, randomize: true });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }
@@ -99,7 +139,7 @@ export async function POST(req: NextRequest) {
         campaignNamesJoined,
         agentIds.length,
         gate.user.id,
-        JSON.stringify({ filters, mode, source, selectedCount: Array.isArray(selectedIds) ? selectedIds.length : 0, rangeFrom: rangeFrom ?? null, rangeTo: rangeTo ?? null }),
+        JSON.stringify({ filters: effFilters, mode, source, selectedCount: Array.isArray(selectedIds) ? selectedIds.length : 0, rangeFrom: rangeFrom ?? null, rangeTo: rangeTo ?? null }),
         sourcePriority,
         mlsScope,
       ]

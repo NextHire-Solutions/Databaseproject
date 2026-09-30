@@ -5,6 +5,7 @@ import { gatherExportRows } from "@/lib/export/gather-rows";
 import { sendRowsToClay, statusNote } from "@/lib/integrations/clay-send";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/api/require-permission";
+import { allowedClientIds } from "@/lib/auth/client-access";
 
 export const maxDuration = 300;
 
@@ -14,6 +15,12 @@ export async function POST(req: NextRequest) {
   const gate = await requirePermission("campaign.send");
   if (!gate.ok) return gate.response;
   const supabase = await createClient();
+
+  // 0124: Clay sends target the legacy clients table, which the per-user client restriction
+  // is not defined on — so a restricted account cannot use this path at all.
+  if (await allowedClientIds(gate.user) !== null) {
+    return NextResponse.json({ error: "Not available for this account." }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => ({}));
   const { clientId, campaignId = null, campaignName = null, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo, columns } = body ?? {};

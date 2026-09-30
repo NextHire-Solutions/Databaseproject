@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/api/require-permission";
+import { allowedClientIds, restrictClientFilter } from "@/lib/auth/client-access";
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,7 +25,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => ({}));
   const patch: Record<string, unknown> = {};
   if (typeof body?.name === "string" && body.name.trim()) patch.name = body.name.trim();
-  if (body?.filters !== undefined) patch.filters = body.filters;
+  if (body?.filters !== undefined)
+    patch.filters = restrictClientFilter(body.filters as Record<string, unknown>, await allowedClientIds(gate.user));
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   const { error } = await supabase.from("saved_lists").update(patch).eq("id", id).eq("user_id", gate.user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
