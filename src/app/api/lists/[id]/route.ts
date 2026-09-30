@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/api/require-permission";
-import { allowedClientIds, restrictClientFilter } from "@/lib/auth/client-access";
+import { allowedClientIds, restrictClientFilter, resolveOrchClientId } from "@/lib/auth/client-access";
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -25,6 +25,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => ({}));
   const patch: Record<string, unknown> = {};
   if (typeof body?.name === "string" && body.name.trim()) patch.name = body.name.trim();
+  // 0125: client attachment — body key present means "set it" (null detaches)
+  if ("orchClientId" in (body ?? {})) {
+    const orchClientId = await resolveOrchClientId(body.orchClientId, gate.user);
+    if (orchClientId instanceof NextResponse) return orchClientId;
+    patch.orch_client_id = orchClientId;
+  }
   if (body?.filters !== undefined)
     patch.filters = restrictClientFilter(body.filters as Record<string, unknown>, await allowedClientIds(gate.user));
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "nothing to update" }, { status: 400 });

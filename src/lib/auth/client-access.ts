@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import type { Caller } from "@/lib/auth/caller";
 
@@ -28,6 +29,25 @@ export async function allowedClientNames(caller: Caller): Promise<Set<string> | 
     [ids]
   );
   return new Set(rows.map((r) => String(r.client_name).trim().toLowerCase()));
+}
+
+// 0125: validate a client id being ATTACHED to something (a saved view). Returns the id to
+// store (null = no attachment), or an error response: a made-up id is refused rather than left
+// to surface as an FK violation, and a client-restricted account may only attach its own
+// clients. `undefined` and `null` both mean "no client", so callers can pass the body value
+// straight through.
+export async function resolveOrchClientId(raw: unknown, caller: Caller): Promise<string | null | NextResponse> {
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) {
+    return NextResponse.json({ error: "bad client id" }, { status: 400 });
+  }
+  const allowed = await allowedClientIds(caller);
+  if (allowed !== null && !allowed.includes(raw)) {
+    return NextResponse.json({ error: "You don't have access to this client." }, { status: 403 });
+  }
+  const { rows } = await getPool().query("select 1 from orch_clients where id = $1", [raw]);
+  if (!rows.length) return NextResponse.json({ error: "Unknown client" }, { status: 400 });
+  return raw;
 }
 
 // A filter payload can reference clients directly (orchClientIds — the "In a client campaign"
