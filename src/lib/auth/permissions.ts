@@ -42,6 +42,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   owner: ALL,
   admin: ALL,
   manager: ["search", "views", "agents.edit", "export", "campaign.send", "import"],
+  // Contractor salespeople (CO-69): work the database and pull lists, but no sending, no
+  // importing, no agent edits, and no client names (none of the CLIENT_LIST permissions).
+  salesperson: ["search", "views", "export"],
   viewer: ["search", "views"],
 };
 
@@ -59,3 +62,16 @@ export function canAny(role: UserRole | null | undefined, ps: readonly Permissio
 // Client names and campaign pickers are needed by more than one kind of work: the Clients page,
 // choosing where to send leads, and choosing which client an import belongs to.
 export const CLIENT_LIST: readonly Permission[] = ["clients", "campaign.send", "import"];
+
+// CO-69: "They can export out of the DB up to 1000." Per-export row cap by role; null = no cap.
+// Enforced server-side in /api/export/csv (requests over the cap are clamped, and the audit log
+// records that they were), and roles WITH a cap are also refused the stored-exports download
+// endpoint, since a stored file can be any size.
+export const EXPORT_ROW_CAP: Partial<Record<UserRole, number>> = {
+  salesperson: 1000,
+};
+
+export function exportCapFor(role: UserRole | null | undefined): number | null {
+  if (!role) return null;
+  return EXPORT_ROW_CAP[role] ?? null;
+}

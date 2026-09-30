@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 const NAV = [
   { title: "Agent Search", href: "/search", icon: Users, minRole: "viewer" as UserRole },
   { title: "Import", href: "/import", icon: Database, minRole: "manager" as UserRole },
-  { title: "Export", href: "/export", icon: FileDown, minRole: "manager" as UserRole },
+  { title: "Export", href: "/export", icon: FileDown, minRole: "salesperson" as UserRole },
   { title: "Clients", href: "/webhooks", icon: Building2, minRole: "admin" as UserRole },
 ];
 

@@ -1,4 +1,4 @@
-export type UserRole = "owner" | "admin" | "manager" | "viewer";
+export type UserRole = "owner" | "admin" | "manager" | "salesperson" | "viewer";
 
 export interface UserProfile {
   id: string;
@@ -11,9 +11,10 @@ export interface UserProfile {
 }
 
 export const ROLE_HIERARCHY: Record<UserRole, number> = {
-  owner: 4,
-  admin: 3,
-  manager: 2,
+  owner: 5,
+  admin: 4,
+  manager: 3,
+  salesperson: 2, // contractor salespeople: search + views + capped export, nothing else
   viewer: 1,
 };
 

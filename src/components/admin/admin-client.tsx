@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { MlsTab } from "./mls-tab";
 import { useRole } from "@/lib/context/role-context";
 
-const ROLES = ["owner", "admin", "manager", "viewer"];
+const ROLES = ["owner", "admin", "manager", "salesperson", "viewer"];
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 
 function CopyButton({ value }: { value: string }) {

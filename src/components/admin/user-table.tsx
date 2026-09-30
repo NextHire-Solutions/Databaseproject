@@ -31,13 +31,14 @@ interface UserTableProps {
 }
 
 const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
+  salesperson: "bg-teal-100 text-teal-800",
   owner: "bg-purple-100 text-purple-700 border-purple-200",
   admin: "bg-green-100 text-green-700 border-green-200",
   manager: "bg-blue-100 text-blue-700 border-blue-200",
   viewer: "bg-amber-100 text-amber-700 border-amber-200",
 };
 
-const ALL_ROLES: UserRole[] = ["owner", "admin", "manager", "viewer"];
+const ALL_ROLES: UserRole[] = ["owner", "admin", "manager", "salesperson", "viewer"];
 
 export function UserTable({ users, currentUserRole, currentUserEmail, onRefresh }: UserTableProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());

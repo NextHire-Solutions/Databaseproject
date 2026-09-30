@@ -735,7 +735,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           {/* A21: saved views now apply in every mode. Agent / MLS / Location resolve them via
               fn_agent_where; Office / Brand via fn_office_where (0082), where a view means
               "the offices those agents work at". */}
-          <SavedViewsPopover value={filters.savedViews} onChange={(v) => setF("savedViews", v)} />
+          <SavedViewsPopover value={filters.savedViews} onChange={(v) => setF("savedViews", v)} clientIds={filters.orchClientMode !== "exclude" ? filters.orchClientIds : []} />
           {(mode === "office" || mode === "brand") && (
             <>
               <MlsPopover

@@ -678,6 +678,7 @@ interface SavedViewOpt {
   id: string;
   name: string;
   count: number | null; // cached agent count (B4) — refreshed on save/edit/import/6h sync
+  orch_client_id?: string | null; // 0125: owning client, for filtering by the Client selection
 }
 interface SavedViewTotals {
   union_count: number | null; // unique agents in at least one view
@@ -687,9 +688,13 @@ interface SavedViewTotals {
 export function SavedViewsPopover({
   value,
   onChange,
+  clientIds = [],
 }: {
   value: { include: string[]; exclude: string[] };
   onChange: (v: { include: string[]; exclude: string[] }) => void;
+  // 0125: clients currently selected in the Client filter (include mode) — while set, the
+  // picker offers only those clients' views, matching the saved-views panel.
+  clientIds?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [views, setViews] = useState<SavedViewOpt[] | null>(null);
@@ -707,10 +712,11 @@ export function SavedViewsPopover({
           .then((r) => r.json())
           .then((j) => {
             setViews(
-              ((j.lists ?? []) as { id: string; name: string; cached_count?: number | null }[]).map((l) => ({
+              ((j.lists ?? []) as { id: string; name: string; cached_count?: number | null; orch_client_id?: string | null }[]).map((l) => ({
                 id: l.id,
                 name: l.name,
                 count: l.cached_count ?? null,
+                orch_client_id: l.orch_client_id ?? null,
               }))
             );
             setTotals((j.totals as SavedViewTotals) ?? null);
@@ -731,7 +737,9 @@ export function SavedViewsPopover({
       setInc((a) => a.filter((x) => x !== id));
     }
   };
-  const shown = (views ?? []).filter((v) => !q.trim() || v.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const shown = (views ?? [])
+    .filter((v) => clientIds.length === 0 || (v.orch_client_id != null && clientIds.includes(v.orch_client_id)))
+    .filter((v) => !q.trim() || v.name.toLowerCase().includes(q.trim().toLowerCase()));
 
   return (
     <FilterPopoverShell

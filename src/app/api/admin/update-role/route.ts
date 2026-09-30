@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "userId and newRole required" }, { status: 400 });
   }
 
-  const validRoles = ["owner", "admin", "manager", "viewer"];
+  const validRoles = ["owner", "admin", "manager", "salesperson", "viewer"];
   if (!validRoles.includes(newRole)) {
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
   }

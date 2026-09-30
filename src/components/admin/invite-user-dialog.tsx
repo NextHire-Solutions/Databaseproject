@@ -111,6 +111,7 @@ export function InviteUserDialog({
                 <SelectItem value="owner">Owner</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
                 <SelectItem value="manager">Manager</SelectItem>
+                <SelectItem value="salesperson">Salesperson</SelectItem>
                 <SelectItem value="viewer">Viewer</SelectItem>
               </SelectContent>
             </Select>

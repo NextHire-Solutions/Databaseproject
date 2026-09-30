@@ -12,6 +12,8 @@ import type { Filters } from "@/types/agent-filters";
 import type { DataSource, SearchMode } from "@/types/agent";
 import { EXPORT_COLUMNS } from "@/lib/export/columns";
 import { EXPORT_MAX_ROWS, SEND_CONFIRM_THRESHOLD } from "@/lib/export/limits";
+import { useRole } from "@/lib/context/role-context";
+import { can, exportCapFor } from "@/lib/auth/permissions";
 
 interface PortalClientOpt {
   name: string;
@@ -47,7 +49,13 @@ export function ExportDialog({
   source: DataSource;
   mode?: SearchMode;
 }) {
-  const [method, setMethod] = useState<"campaign" | "csv" | "portal">("campaign");
+  // CO-69: only roles that can send see the campaign/portal methods — everyone else (e.g.
+  // salesperson) gets a CSV-only dialog, and their per-export row cap is shown up front.
+  // The server enforces both regardless; this just avoids offering buttons that would 403.
+  const role = useRole();
+  const canSend = can(role, "campaign.send");
+  const roleCap = exportCapFor(role);
+  const [method, setMethod] = useState<"campaign" | "csv" | "portal">(canSend ? "campaign" : "csv");
   const [sourcePriority, setSourcePriority] = useState<"courted" | "zillow" | "realtor">("courted");
   // #4: which MLS's production numbers feed the campaign variables — [] = all combined
   const [mlsScopeSel, setMlsScopeSel] = useState<string[]>([]);
@@ -357,7 +365,9 @@ export function ExportDialog({
           <div>
             <label className="text-sm font-medium text-neutral-700">Method</label>
             <div className="mt-1.5 grid grid-cols-3 gap-2">
-              {([["campaign", "Send to campaign"], ["csv", "Download CSV"], ["portal", "Client portal"]] as const).map(([m, lbl]) => (
+              {([["campaign", "Send to campaign"], ["csv", "Download CSV"], ["portal", "Client portal"]] as const)
+                .filter(([m]) => canSend || m === "csv")
+                .map(([m, lbl]) => (
                 <button
                   key={m}
                   type="button"
@@ -634,6 +644,12 @@ export function ExportDialog({
             {method === "csv" ? "Exporting" : "Sending"}: <span className="font-medium text-neutral-700">{scope}</span>
             {method === "csv" ? ` · ${cols.size} columns` : ""}
           </p>
+
+          {roleCap !== null && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Your exports are capped at {roleCap.toLocaleString()} rows each.
+            </p>
+          )}
 
           {/* A14b: the cap is real and was previously invisible — say so rather than claiming
               to send everything and quietly truncating. */}
