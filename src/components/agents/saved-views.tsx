@@ -15,7 +15,34 @@ interface SavedList {
   name: string;
   filters: Filters;
   cached_count?: number | null; // B4: cached agent count, refreshed on save/edit/import/6h sync
-  orch_client_id?: string | null; // 0125: the client this view belongs to (set from the Client filter on save)
+  orch_client_id?: string | null; // 0125: the client this view belongs to
+  client_name?: string | null; //   resolved name for display
+}
+
+interface ClientOpt {
+  id: string;
+  client_name: string | null;
+}
+
+// Client picker for the save / edit rows. Options are whatever /api/orch/clients returns for
+// THIS caller, so a client-restricted account is only ever offered its own clients, and the
+// server re-checks the id on save either way.
+function ClientSelect({ value, onChange, clients }: { value: string; onChange: (v: string) => void; clients: ClientOpt[] }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-9 w-full rounded-lg border border-neutral-300 bg-white px-2 text-sm text-neutral-700 focus:border-neutral-400 focus:outline-none"
+      title="Attach this view to a client"
+    >
+      <option value="">No client</option>
+      {clients.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.client_name}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 export function SavedViews({
@@ -39,23 +66,37 @@ export function SavedViews({
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editClientId, setEditClientId] = useState("");
   const [q, setQ] = useState(""); // filter the list by name
+  const [clients, setClients] = useState<ClientOpt[]>([]);
+  const [clientId, setClientId] = useState(""); // client for the view being saved
 
   async function load() {
     const r = await fetch("/api/lists");
     const j = await r.json();
     setLists(j.lists ?? []);
   }
-  useEffect(() => {
-    if (open) load();
-  }, [open]);
 
-  // The Client filter drives the view<->client connection (0125): while client(s) are selected
-  // (include mode), the list below shows ONLY their views, and a view saved with exactly one
-  // client selected is attached to that client automatically — no separate picker to fill in.
-  // Exclude mode means "everyone but these clients", which is not working ON a client, so it
-  // neither filters nor attaches.
+  // The Client filter and the Save dropdown both drive the view<->client link (0125). While
+  // client(s) are selected in the Client filter (include mode), the list below shows ONLY their
+  // views; and when exactly one is selected the Save dropdown defaults to it, so the common
+  // "work a client, save its views" flow needs no extra click. The dropdown still lets you pick
+  // any client (or none) explicitly. Exclude mode neither filters nor pre-selects.
   const selectedClients = filters.orchClientMode !== "exclude" ? filters.orchClientIds : [];
+
+  useEffect(() => {
+    if (open) {
+      load();
+      setClientId(selectedClients.length === 1 ? selectedClients[0] : "");
+      if (clients.length === 0) {
+        fetch("/api/orch/clients")
+          .then((r) => r.json())
+          .then((j) => setClients(((j.clients ?? []) as ClientOpt[]).filter((c) => c.client_name)))
+          .catch(() => {}); // no client access -> dropdown just offers "No client"
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // A view saved with nothing applied matches the whole database, so every search that later
   // references it scans 1.1M rows. That happened in production, so saving one now takes a
@@ -78,11 +119,11 @@ export function SavedViews({
     const res = await fetch("/api/lists", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, filters, orchClientId: selectedClients.length === 1 ? selectedClients[0] : null }),
+      body: JSON.stringify({ name, filters, orchClientId: clientId || null }),
     });
     setSaving(false);
     if (res.ok) {
-      toast.success(selectedClients.length === 1 ? "View saved to the selected client" : "View saved");
+      toast.success(clientId ? "View saved to the selected client" : "View saved");
       setName("");
       load();
     } else {
@@ -113,19 +154,20 @@ export function SavedViews({
     }
   }
 
-  async function rename(id: string) {
+  // Save name AND client attachment from the edit row.
+  async function saveEdit(id: string) {
     if (!editName.trim()) return;
     const res = await fetch(`/api/lists/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editName.trim() }),
+      body: JSON.stringify({ name: editName.trim(), orchClientId: editClientId || null }),
     });
     setEditId(null);
     if (res.ok) {
-      toast.success("View renamed");
+      toast.success("View updated");
       load();
     } else {
-      toast.error("Rename failed");
+      toast.error("Update failed");
     }
   }
 
@@ -133,7 +175,11 @@ export function SavedViews({
   const inSelection = selectedClients.length
     ? lists.filter((v) => v.orch_client_id && selectedClients.includes(v.orch_client_id))
     : lists;
-  const shown = needle ? inSelection.filter((v) => v.name.toLowerCase().includes(needle)) : inSelection;
+  const shown = needle
+    ? inSelection.filter(
+        (v) => v.name.toLowerCase().includes(needle) || (v.client_name ?? "").toLowerCase().includes(needle)
+      )
+    : inSelection;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -158,12 +204,15 @@ export function SavedViews({
             Save
           </Button>
         </div>
+        {/* Client attachment for the view being saved. Defaults to the Client filter's client. */}
+        <div className="mt-2">
+          <ClientSelect value={clientId} onChange={setClientId} clients={clients} />
+        </div>
 
         <div className="mb-1 mt-3 text-xs font-medium text-neutral-500">Saved views</div>
         {selectedClients.length > 0 && (
           <p className="mb-1.5 rounded-md bg-blue-50 px-2 py-1 text-[11px] leading-snug text-blue-700">
             Client filter active — showing {inSelection.length} of {lists.length} views.
-            {selectedClients.length === 1 ? " New views save to this client." : ""}
           </p>
         )}
         {lists.length > 5 && (
@@ -189,23 +238,26 @@ export function SavedViews({
           ) : (
             shown.map((v) =>
               editId === v.id ? (
-                <div key={v.id} className="flex items-center gap-2 rounded px-2 py-1.5">
-                  <Input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    autoFocus
-                    className="h-8"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") rename(v.id);
-                      if (e.key === "Escape") setEditId(null);
-                    }}
-                  />
-                  <button type="button" onClick={() => rename(v.id)} className="text-neutral-500 hover:text-green-600" title="Save name">
-                    <Check className="h-4 w-4" />
-                  </button>
-                  <button type="button" onClick={() => setEditId(null)} className="text-neutral-400 hover:text-neutral-700" title="Cancel">
-                    <X className="h-4 w-4" />
-                  </button>
+                <div key={v.id} className="space-y-1.5 rounded px-2 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      autoFocus
+                      className="h-8"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveEdit(v.id);
+                        if (e.key === "Escape") setEditId(null);
+                      }}
+                    />
+                    <button type="button" onClick={() => saveEdit(v.id)} className="text-neutral-500 hover:text-green-600" title="Save changes">
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => setEditId(null)} className="text-neutral-400 hover:text-neutral-700" title="Cancel">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <ClientSelect value={editClientId} onChange={setEditClientId} clients={clients} />
                 </div>
               ) : (
                 <div key={v.id} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-neutral-50">
@@ -249,9 +301,17 @@ export function SavedViews({
                     <FolderOpen className="h-4 w-4 shrink-0 text-neutral-400" />
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="min-w-0 flex-1 truncate">{v.name}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{v.name}</span>
+                          {v.client_name && (
+                            <span className="block truncate text-[11px] leading-tight text-neutral-400">{v.client_name}</span>
+                          )}
+                        </span>
                       </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs break-words">{v.name}</TooltipContent>
+                      <TooltipContent side="top" className="max-w-xs break-words">
+                        {v.name}
+                        {v.client_name ? ` — ${v.client_name}` : ""}
+                      </TooltipContent>
                     </Tooltip>
                   </button>
                   {/* Count is its OWN column, not part of the name button: inside the button it
@@ -267,9 +327,10 @@ export function SavedViews({
                       onClick={() => {
                         setEditId(v.id);
                         setEditName(v.name);
+                        setEditClientId(v.orch_client_id ?? "");
                       }}
                       className="text-neutral-300 hover:text-neutral-700"
-                      title="Rename view"
+                      title="Rename / set client"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
