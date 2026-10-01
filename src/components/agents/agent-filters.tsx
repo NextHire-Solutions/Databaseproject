@@ -702,11 +702,23 @@ export function SavedViewsPopover({
   const [inc, setInc] = useState<string[]>(value.include);
   const [exc, setExc] = useState<string[]>(value.exclude);
   const [q, setQ] = useState("");
+  // 0125: a client dropdown IN this popover — picking a client narrows the view list to that
+  // client's views, same as the Client filter does, without leaving the popover. Seeded from
+  // the Client filter's current selection so the two stay consistent.
+  const [clients, setClients] = useState<{ id: string; client_name: string | null }[]>([]);
+  const [clientPick, setClientPick] = useState<string>("");
 
   useEffect(() => {
     if (open) {
       setInc(value.include);
       setExc(value.exclude);
+      setClientPick(clientIds.length === 1 ? clientIds[0] : "");
+      if (clients.length === 0) {
+        fetch("/api/orch/clients")
+          .then((r) => r.json())
+          .then((j) => setClients(((j.clients ?? []) as { id: string; client_name: string | null }[]).filter((c) => c.client_name)))
+          .catch(() => {});
+      }
       if (views === null) {
         fetch("/api/lists")
           .then((r) => r.json())
@@ -737,8 +749,9 @@ export function SavedViewsPopover({
       setInc((a) => a.filter((x) => x !== id));
     }
   };
+  const clientNarrow = clientPick ? [clientPick] : clientIds;
   const shown = (views ?? [])
-    .filter((v) => clientIds.length === 0 || (v.orch_client_id != null && clientIds.includes(v.orch_client_id)))
+    .filter((v) => clientNarrow.length === 0 || (v.orch_client_id != null && clientNarrow.includes(v.orch_client_id)))
     .filter((v) => !q.trim() || v.name.toLowerCase().includes(q.trim().toLowerCase()));
 
   return (
@@ -795,6 +808,21 @@ export function SavedViewsPopover({
           </button>
         </div>
       </div>
+      {clients.length > 0 && (
+        <select
+          value={clientPick}
+          onChange={(e) => setClientPick(e.target.value)}
+          className="mb-2 h-9 w-full rounded-lg border border-neutral-300 bg-white px-3 text-sm text-neutral-700 focus:border-neutral-400 focus:outline-none"
+          title="Show only this client's views"
+        >
+          <option value="">All clients</option>
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.client_name}
+            </option>
+          ))}
+        </select>
+      )}
       {views && views.length > 6 && (
         <input
           value={q}
