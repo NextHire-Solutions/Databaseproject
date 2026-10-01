@@ -160,6 +160,12 @@ export function SavedViews({
         </div>
 
         <div className="mb-1 mt-3 text-xs font-medium text-neutral-500">Saved views</div>
+        {selectedClients.length > 0 && (
+          <p className="mb-1.5 rounded-md bg-blue-50 px-2 py-1 text-[11px] leading-snug text-blue-700">
+            Client filter active — showing {inSelection.length} of {lists.length} views.
+            {selectedClients.length === 1 ? " New views save to this client." : ""}
+          </p>
+        )}
         {lists.length > 5 && (
           <div className="relative mb-1.5">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />

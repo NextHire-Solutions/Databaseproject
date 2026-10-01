@@ -20,8 +20,13 @@ export async function sanitizeSavedViews(
   if (!userId) return { ...filters, savedViews: { include: [], exclude: [] } };
 
   const ids = [...new Set([...include, ...exclude])];
+  // Owners/admins share one pool of views (they all see the same list), so they may reference
+  // any view; everyone else only their own or explicitly shared ones.
   const { rows } = await getPool().query(
-    "select id::text from saved_lists where id = any($1::uuid[]) and (user_id = $2 or is_shared = true)",
+    `select id::text from saved_lists
+      where id = any($1::uuid[])
+        and (user_id = $2 or is_shared = true
+             or exists (select 1 from user_profiles p where p.id = $2 and p.role in ('owner','admin')))`,
     [ids, userId]
   );
   const allowed = new Set(rows.map((r) => r.id as string));
