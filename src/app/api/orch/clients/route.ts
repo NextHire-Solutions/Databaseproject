@@ -46,7 +46,12 @@ export async function GET(req: NextRequest) {
               (select count(distinct b.email) from v_client_campaign_leads b where b.client_id = c.id)::int as bison_leads,
               (select count(distinct b.agent_id) from v_client_campaign_leads b where b.client_id = c.id and b.agent_id is not null)::int as bison_matched,
               (select count(distinct b.email) from v_client_campaign_leads b where b.client_id = c.id and b.replied)::int as bison_replied,
-              (select count(distinct b.email) from v_client_campaign_leads b where b.client_id = c.id and b.bounced)::int as bison_bounced
+              (select count(distinct b.email) from v_client_campaign_leads b where b.client_id = c.id and b.bounced)::int as bison_bounced,
+              -- 0125: saved views attached to this client, and the agents inside them. The agent
+              -- total sums each view's cached_count, so overlapping views can double-count — it
+              -- is a size indication, not a de-duplicated union.
+              (select count(*) from saved_lists sl where sl.orch_client_id = c.id)::int as saved_views,
+              (select coalesce(sum(sl.cached_count), 0) from saved_lists sl where sl.orch_client_id = c.id)::int as saved_view_agents
          from orch_clients c
          left join orch_client_leads l on l.client_id = c.id
         ${where.length ? `where ${where.join(" and ")}` : ""}

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -20,10 +21,23 @@ interface OrchClientRow {
   bison_leads?: number;
   bison_replied?: number;
   bison_bounced?: number; // C1: bounced leads in this client's campaigns
+  saved_views?: number; //       0125: saved views attached to this client
+  saved_view_agents?: number; //  sum of those views' cached agent counts
   /** Lifecycle status from the OS: active | paused | churned. Null = unknown. */
   lifecycle?: string | null;
   created_at: string;
 }
+
+// Sortable numeric/date columns. Each maps a row to a comparable number.
+type SortKey = "bison_leads" | "saved_views" | "saved_view_agents" | "bison_replied" | "bison_bounced" | "created_at";
+const SORT_VALUE: Record<SortKey, (c: OrchClientRow) => number> = {
+  bison_leads: (c) => c.bison_leads ?? 0,
+  saved_views: (c) => c.saved_views ?? 0,
+  saved_view_agents: (c) => c.saved_view_agents ?? 0,
+  bison_replied: (c) => c.bison_replied ?? 0,
+  bison_bounced: (c) => c.bison_bounced ?? 0,
+  created_at: (c) => new Date(c.created_at).getTime(),
+};
 
 const STATUS_TONE: Record<string, string> = {
   leads_built: "bg-green-100 text-green-800",
@@ -59,6 +73,34 @@ export default function ClientsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
+  // sort + status filters (client-side — ~50 rows)
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "created_at", dir: "desc" });
+  const [clientStatus, setClientStatus] = useState("all"); // lifecycle: active | paused | churned | unknown
+  const [onboardStatus, setOnboardStatus] = useState("all"); // c.status
+
+  function toggleSort(key: SortKey) {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
+  }
+
+  // the dropdown choices come from the data, so a new status value shows up on its own
+  const clientStatusOpts = useMemo(
+    () => Array.from(new Set(clients.map((c) => c.lifecycle || "unknown"))).sort(),
+    [clients]
+  );
+  const onboardStatusOpts = useMemo(
+    () => Array.from(new Set(clients.map((c) => c.status || "—"))).sort(),
+    [clients]
+  );
+
+  const visible = useMemo(() => {
+    const filtered = clients.filter((c) => {
+      if (clientStatus !== "all" && (c.lifecycle || "unknown") !== clientStatus) return false;
+      if (onboardStatus !== "all" && (c.status || "—") !== onboardStatus) return false;
+      return true;
+    });
+    const val = SORT_VALUE[sort.key];
+    return [...filtered].sort((a, b) => (sort.dir === "asc" ? val(a) - val(b) : val(b) - val(a)));
+  }, [clients, clientStatus, onboardStatus, sort]);
 
   async function load() {
     setLoading(true);
@@ -159,6 +201,48 @@ export default function ClientsPage() {
         </div>
       </div>
 
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-1.5 text-xs text-neutral-500">
+          Client status
+          <select
+            value={clientStatus}
+            onChange={(e) => setClientStatus(e.target.value)}
+            className="h-8 rounded-lg border border-neutral-300 bg-white px-2 text-sm text-neutral-700 focus:border-neutral-400 focus:outline-none"
+          >
+            <option value="all">All</option>
+            {clientStatusOpts.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-neutral-500">
+          Onboarding status
+          <select
+            value={onboardStatus}
+            onChange={(e) => setOnboardStatus(e.target.value)}
+            className="h-8 rounded-lg border border-neutral-300 bg-white px-2 text-sm text-neutral-700 focus:border-neutral-400 focus:outline-none"
+          >
+            <option value="all">All</option>
+            {onboardStatusOpts.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </label>
+        {(clientStatus !== "all" || onboardStatus !== "all") && (
+          <button
+            type="button"
+            onClick={() => { setClientStatus("all"); setOnboardStatus("all"); }}
+            className="text-xs text-neutral-500 hover:underline"
+          >
+            Clear filters · {visible.length} of {clients.length}
+          </button>
+        )}
+      </div>
+
       <div className="flex-1 overflow-auto rounded-xl border border-neutral-200 bg-white shadow-sm">
         <table className="w-full text-sm">
           <thead className="border-b border-neutral-200 text-left text-xs font-medium text-neutral-500">
@@ -167,35 +251,35 @@ export default function ClientsPage() {
               <th className="px-4 py-3">Client status</th>
               <th className="px-4 py-3">Onboarding status</th>
               <th className="px-4 py-3">MLS</th>
-              <th className="px-4 py-3">Location</th>
-              <th className="px-4 py-3 text-right">Leads built</th>
-              <th className="px-4 py-3 text-right">In sequencers</th>
+              <SortTh label="In sequencers" k="bison_leads" sort={sort} onSort={toggleSort} />
+              <SortTh label="Saved views" k="saved_views" sort={sort} onSort={toggleSort} />
+              <SortTh label="View agents" k="saved_view_agents" sort={sort} onSort={toggleSort} />
               {/* These counted EmailBison only, so they were labelled "(Bison)" to stop them
                   silently disagreeing with the agent table. Since 0111 they read
                   v_client_campaign_leads and cover both sequencers, so the qualifier is gone. */}
-              <th className="px-4 py-3 text-right">Replied</th>
-              <th className="px-4 py-3 text-right">Bounced</th>
-              <th className="px-4 py-3">In review</th>
-              <th className="px-4 py-3">Exported</th>
+              <SortTh label="Replied" k="bison_replied" sort={sort} onSort={toggleSort} />
+              <SortTh label="Bounced" k="bison_bounced" sort={sort} onSort={toggleSort} />
               <th className="px-4 py-3 text-right">Campaign ID</th>
-              <th className="px-4 py-3">Onboarded</th>
+              <SortTh label="Onboarded" k="created_at" sort={sort} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={13} className="py-12 text-center text-neutral-400">
+                <td colSpan={11} className="py-12 text-center text-neutral-400">
                   Loading…
                 </td>
               </tr>
-            ) : clients.length === 0 ? (
+            ) : visible.length === 0 ? (
               <tr>
-                <td colSpan={13} className="py-12 text-center text-neutral-400">
-                  No clients yet — they appear here automatically once onboarded.
+                <td colSpan={11} className="py-12 text-center text-neutral-400">
+                  {clients.length === 0
+                    ? "No clients yet — they appear here automatically once onboarded."
+                    : "No clients match the selected filters."}
                 </td>
               </tr>
             ) : (
-              clients.map((c) => (
+              visible.map((c) => (
                 <tr key={c.id} className="border-b border-neutral-100">
                   <td className="px-4 py-3 font-medium text-neutral-900">{c.client_name ?? "Unnamed client"}</td>
                   <td className="px-4 py-3">
@@ -213,20 +297,18 @@ export default function ClientsPage() {
                     <Badge className={STATUS_TONE[c.status ?? ""] ?? "bg-neutral-100 text-neutral-700"}>{c.status ?? "—"}</Badge>
                   </td>
                   <td className="px-4 py-3 text-neutral-600">{c.mls ?? "—"}</td>
-                  <td className="px-4 py-3 text-neutral-600">{c.location ?? "—"}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-neutral-800">{c.lead_count.toLocaleString()}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-neutral-600">{(c.bison_leads ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-neutral-800">
+                    {c.saved_views ? c.saved_views.toLocaleString() : <span className="text-neutral-400">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-neutral-600">
+                    {c.saved_view_agents ? c.saved_view_agents.toLocaleString() : <span className="text-neutral-400">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {c.bison_replied ? <span className="text-green-700">{c.bison_replied.toLocaleString()}</span> : <span className="text-neutral-400">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {c.bison_bounced ? <span className="font-medium text-red-600">{c.bison_bounced.toLocaleString()}</span> : <span className="text-neutral-400">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    {c.leads_inreview ? <Badge className="bg-amber-100 text-amber-800">In review</Badge> : <span className="text-neutral-400">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    {c.bison_leads_exported ? <Badge className="bg-green-100 text-green-800">Exported</Badge> : <span className="text-neutral-400">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-neutral-600">{c.bison_campaign_id ?? "—"}</td>
                   <td className="px-4 py-3 text-neutral-500">{new Date(c.created_at).toLocaleDateString()}</td>
@@ -266,5 +348,38 @@ export default function ClientsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// A right-aligned, clickable column header. Shows a neutral arrow until it's the active sort,
+// then the direction. Click toggles asc/desc.
+function SortTh({
+  label,
+  k,
+  sort,
+  onSort,
+}: {
+  label: string;
+  k: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (k: SortKey) => void;
+}) {
+  const active = sort.key === k;
+  return (
+    <th className="px-4 py-3 text-right">
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className={`ml-auto inline-flex items-center gap-1 hover:text-neutral-800 ${active ? "text-neutral-800" : ""}`}
+        title={`Sort by ${label}`}
+      >
+        {label}
+        {active ? (
+          sort.dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 text-neutral-300" />
+        )}
+      </button>
+    </th>
   );
 }
