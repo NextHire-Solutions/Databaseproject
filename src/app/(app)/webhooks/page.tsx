@@ -259,20 +259,19 @@ export default function ClientsPage() {
                   v_client_campaign_leads and cover both sequencers, so the qualifier is gone. */}
               <SortTh label="Replied" k="bison_replied" sort={sort} onSort={toggleSort} />
               <SortTh label="Bounced" k="bison_bounced" sort={sort} onSort={toggleSort} />
-              <th className="px-4 py-3 text-right">Campaign ID</th>
               <SortTh label="Onboarded" k="created_at" sort={sort} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={11} className="py-12 text-center text-neutral-400">
+                <td colSpan={10} className="py-12 text-center text-neutral-400">
                   Loading…
                 </td>
               </tr>
             ) : visible.length === 0 ? (
               <tr>
-                <td colSpan={11} className="py-12 text-center text-neutral-400">
+                <td colSpan={10} className="py-12 text-center text-neutral-400">
                   {clients.length === 0
                     ? "No clients yet — they appear here automatically once onboarded."
                     : "No clients match the selected filters."}
@@ -310,7 +309,6 @@ export default function ClientsPage() {
                   <td className="px-4 py-3 text-right tabular-nums">
                     {c.bison_bounced ? <span className="font-medium text-red-600">{c.bison_bounced.toLocaleString()}</span> : <span className="text-neutral-400">—</span>}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-neutral-600">{c.bison_campaign_id ?? "—"}</td>
                   <td className="px-4 py-3 text-neutral-500">{new Date(c.created_at).toLocaleDateString()}</td>
                 </tr>
               ))
