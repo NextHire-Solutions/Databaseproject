@@ -50,10 +50,70 @@ if (!env.DATABASE_URL) {
   console.error("DATABASE_URL is not set");
   process.exit(1);
 }
-const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Math.max(10, ENRICH_CONCURRENCY + 4) });
+// Hang guard (2026-10-05). The worker froze for five days: a Supabase connection dropped
+// mid-query with no FIN, `await pool.query` waited forever, and because the loop is
+// single-threaded that froze everything — no error, no crash, no log, 28k leads stuck. Every
+// HTTP call here already carries a timeout; the pool was the one unbounded wait. So:
+//   - keepAlive: the OS notices a dead peer within minutes instead of never.
+//   - statement_timeout (server) + query_timeout (client): a query can't outlive 60/70s. The
+//     worker's heaviest query measured 75ms, so nothing legitimate is anywhere near this.
+//   - connectionTimeoutMillis: acquiring a client can't hang either.
+const pool = new pg.Pool({
+  connectionString: env.DATABASE_URL,
+  max: Math.max(10, ENRICH_CONCURRENCY + 4),
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 30_000,
+  connectionTimeoutMillis: 30_000,
+  statement_timeout: 60_000,
+  query_timeout: 70_000,
+  idleTimeoutMillis: 30_000,
+});
 pool.on("error", (e) => console.error("pg pool idle-client error:", e.message)); // never crash the loop
 
+// Heartbeat = "a database query completed successfully". Deliberately NOT "a lead was
+// claimed": an idle worker still polls every few seconds, so idle never looks like a hang,
+// only a genuine one does. Timers keep firing while a promise is stuck, which is what lets
+// an in-process watchdog see a hung loop at all.
+let lastDbOk = Date.now();
+const rawQuery = pool.query.bind(pool);
+pool.query = async (...args) => {
+  const r = await rawQuery(...args);
+  lastDbOk = Date.now();
+  return r;
+};
+
+// A dead-connection error must not spend one of a lead's attempts — it says nothing about
+// the lead. Matches pg's own wording only (never a provider's HTTP timeout, which is the
+// lead's problem and should count).
+const isDbConnectivityError = (e) =>
+  /Query read timeout|canceling statement due to statement timeout|Connection terminated|timeout exceeded when trying to connect|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT/i.test(
+    e instanceof Error ? e.message : String(e)
+  );
+
 let shuttingDown = false;
+
+// Watchdog: if no query has completed for WATCHDOG_MIN while the process is alive, the loop
+// is hung — exit, and Railway's restart policy brings a fresh process back in seconds
+// instead of the five days this took to notice by hand. The audit row goes through a
+// separate short-timeout client, because the pool is the thing that's stuck.
+const WATCHDOG_MIN = Math.max(2, Number(env.WATCHDOG_MIN) || 10);
+setInterval(async () => {
+  if (shuttingDown) return;
+  const stalledMs = Date.now() - lastDbOk;
+  if (stalledMs < WATCHDOG_MIN * 60_000) return;
+  const note = `enrich-worker watchdog: no database query completed for ${Math.round(stalledMs / 60_000)} min — exiting so Railway restarts it`;
+  console.error(note);
+  const client = new pg.Client({ connectionString: env.DATABASE_URL, connectionTimeoutMillis: 5_000, query_timeout: 5_000, statement_timeout: 5_000 });
+  await Promise.race([
+    (async () => {
+      await client.connect();
+      await client.query(`insert into audit_logs (action, performed_by, details) values ('enrich_worker_watchdog', 'enrich-worker', $1)`, [note]);
+      await client.end();
+    })().catch(() => {}),
+    new Promise((r) => setTimeout(r, 8_000)),
+  ]);
+  process.exit(2);
+}, 30_000);
 process.on("SIGTERM", () => { shuttingDown = true; console.log("SIGTERM — releasing unprocessed items, then exiting"); });
 process.on("SIGINT", () => { shuttingDown = true; });
 
@@ -400,6 +460,11 @@ async function setItem(item, token, fields) {
 // transient failure -> retry from the given stable status; terminal after MAX_ATTEMPTS
 async function failOrRetry(item, token, backTo, err, extraFields = {}) {
   const msg = err instanceof Error ? err.message : String(err);
+  // Our connection dying is not the lead's failure: release it unchanged, attempt not spent.
+  if (isDbConnectivityError(err)) {
+    await setItem(item, token, { ...extraFields, status: backTo, error: `released: ${msg}`, claimed_at: null });
+    return;
+  }
   const attempts = item.attempts + 1;
   if (attempts >= MAX_ATTEMPTS) {
     await setItem(item, token, { ...extraFields, status: "failed", attempts, error: msg, claimed_at: null });
