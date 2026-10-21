@@ -321,6 +321,10 @@ export function mapAgentToBisonLead(agent, email, mlsCode, order = PRIORITY_ORDE
     ["top producing city", cityState(byPriority(agent, order, "city", "most_transacted_city"), agent.transacted_state)],
     ["average sales price", money(agent.avg_sale_price)],
     ["closed transactions", num(statByPriority(agent, order, "closed_transactions", "closed_transactions"))],
+    // Oct 2026: closed units. The "units" custom variable was created in the EmailBison
+    // workspace (id 35) BEFORE this line shipped — a lead upsert naming a variable the
+    // workspace doesn't define must never be the first thing to find out.
+    ["units", num(statByPriority(agent, order, "units", "units"))],
   ];
   return {
     first_name: first,
@@ -688,6 +692,7 @@ async function pushCycle() {
       `select s.agent_id, sum(s.sales_volume) as sales_volume, sum(s.buy_side_dollar) as buy_side_dollar,
               sum(s.list_side_dollar) as list_side_dollar, sum(s.approx_gci) as approx_gci,
               sum(s.closed_transactions) as closed_transactions, sum(s.closed_rentals) as closed_rentals,
+              sum(s.units) as units,
               case when sum(s.units) > 0 then sum(coalesce(s.avg_sale_price, 0) * coalesce(s.units, 0)) / sum(s.units) end as avg_sale_price,
               (select string_agg(m2.code, ' | ' order by m2.code) from agent_mls am2 join mls m2 on m2.id = am2.mls_id
                 where am2.agent_id = s.agent_id and am2.mls_id = any($2::uuid[])) as mls_codes
@@ -722,7 +727,7 @@ async function pushCycle() {
         ? { ...agent, sales_volume: sc.sales_volume, buy_side_dollar: sc.buy_side_dollar,
             list_side_dollar: sc.list_side_dollar, approx_gci: sc.approx_gci,
             avg_sale_price: sc.avg_sale_price, closed_rentals: sc.closed_rentals,
-            closed_transactions: sc.closed_transactions, stats_by_source: null }
+            closed_transactions: sc.closed_transactions, units: sc.units, stats_by_source: null }
         : agent;
       const payload = mapAgentToBisonLead(payloadAgent, item.email, sc ? sc.mls_codes : agent.mls_code, orderFor(batch.source_priority));
       // Does this lead already exist in the workspace? (also our per-client dedup source)
