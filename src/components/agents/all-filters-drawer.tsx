@@ -183,6 +183,7 @@ function RangeSection({
         prefix={prefix}
         suffix={suffix}
         commas={prefix === "$"}
+        decimals={suffix === "yrs"}
         disabled={disableCustom}
       />
       {hasBuckets && hasCustom && <p className="mt-2 text-xs text-amber-600">Using both a preset and a custom range — clear one.</p>}
@@ -541,6 +542,9 @@ export function AllFiltersDrawer({
           <RangeSection title="Average sales price" count={rangeCount(draft.avgSalePrice)} value={draft.avgSalePrice} onChange={(v) => set("avgSalePrice", v as RangeF)} buckets={[]} prefix="$" />
           <RangeSection title="Est. time in office" count={rangeCount(draft.estTimeInOffice)} value={draft.estTimeInOffice} onChange={(v) => set("estTimeInOffice", v as RangeF)} buckets={YEAR_BUCKETS} suffix="yrs" />
           <RangeSection title="Average time at office" count={rangeCount(draft.avgTimeAtOffice)} value={draft.avgTimeAtOffice} onChange={(v) => set("avgTimeAtOffice", v as RangeF)} buckets={YEAR_BUCKETS} suffix="yrs" />
+          {/* 0126: agents whose office has this many agents (Agent view only — stripped from
+              requests in every other view, see agent-search queryFilters) */}
+          <RangeSection title="Office agent count" count={rangeCount(draft.officeAgentCount)} value={draft.officeAgentCount} onChange={(v) => set("officeAgentCount", v as RangeF)} buckets={COUNT_BUCKETS} suffix="#" />
           <EnrichmentSection
             value={draft.contact}
             onChange={(v) => set("contact", v)}

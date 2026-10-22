@@ -72,7 +72,13 @@ export interface Filters {
   multiCampaign: boolean; // only agents present in 2+ Bison campaigns
   mlsCount: { buckets: string[] }; // exact MLS-affiliation counts: "2".."5" exact, "6+" open (B3)
   savedViews: { include: string[]; exclude: string[] }; // saved_lists ids used as live include/exclude sets (A12)
-  agentCount: RangeF; // office mode: number of agents in the office
+  // Rollup-level count — means a different thing per view: the office's headcount (Office),
+  // the brand total (Brand), the place / MLS total (Location, MLS). Never read by fn_agent_where.
+  agentCount: RangeF;
+  // 0126: Agent view only — agents whose OFFICE has this many agents (offices.agent_count).
+  // Its own key because agentCount's meaning changes per view. Sent from the Agent view only;
+  // agent-search strips it everywhere else (queryFilters).
+  officeAgentCount: RangeF;
   zillowRealtor: ZillowRealtorFilter;
 }
 
@@ -100,6 +106,7 @@ export const DEFAULT_FILTERS: Filters = {
   mlsCount: { buckets: [] },
   savedViews: { include: [], exclude: [] },
   agentCount: { buckets: [], min: "", max: "" },
+  officeAgentCount: { buckets: [], min: "", max: "" },
   zillowRealtor: { languages: [], totalSales: { min: "", max: "" }, avgPriceAllTime: { min: "", max: "" }, avgVolumeAllTime: { min: "", max: "" }, hasLinkedin: false },
 };
 
@@ -191,6 +198,8 @@ export function normalizeFilters(
   merged.location = { ...merged.location, values: (merged.location.values ?? []).filter(okEntry), excludeValues: (merged.location.excludeValues ?? []).filter(okEntry) };
   if (!merged.location.excludeField) merged.location = { ...merged.location, excludeField: merged.location.field };
   if (!merged.mlsCount || !Array.isArray(merged.mlsCount.buckets)) merged.mlsCount = { buckets: [] };
+  if (!merged.officeAgentCount || !Array.isArray(merged.officeAgentCount.buckets))
+    merged.officeAgentCount = { buckets: [], min: "", max: "" };
   // saved views stored before the multi-campaign filter existed carry no such key
   merged.multiCampaign = merged.multiCampaign === true;
   delete (merged as Partial<Filters> & { orchClientId?: string }).orchClientId;
@@ -233,6 +242,7 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" | "brand"
     rangeCount(f.avgSalePrice) +
     rangeCount(f.estTimeInOffice) +
     rangeCount(f.avgTimeAtOffice) +
+    rangeCount(f.officeAgentCount) +
     ieCount(f.name) +
     contactCount(f.contact) +
     zillowRealtorCount(f.zillowRealtor)

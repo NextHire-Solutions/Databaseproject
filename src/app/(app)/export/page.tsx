@@ -83,6 +83,7 @@ function summarizeFilters(bf: BatchFilters | null): string {
   range("Avg sale price", f.avgSalePrice);
   range("Time at office", f.estTimeInOffice);
   range("Avg time at office", f.avgTimeAtOffice);
+  range("Office agent count", f.officeAgentCount); // 0126
   const ie = (label: string, x?: { include?: string[]; exclude?: string[] }) => {
     if (!x) return;
     if (x.include?.length) parts.push(`${label}: ${x.include.length} incl`);

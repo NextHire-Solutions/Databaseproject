@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -362,6 +362,7 @@ function highlightedColumns(f: Filters, mode: SearchMode): Set<string> {
   if (active(f.estTimeInOffice)) s.add("timeOffice");
   if (active(f.avgTimeAtOffice)) s.add("avgTimeOffice");
   if (mode === "office" && active(f.agentCount)) s.add("agentCount");
+  if (mode === "agent" && active(f.officeAgentCount)) s.add("office");
   if (ie(f.officeSearch.brand)) s.add("brand");
   if (ie(f.officeSearch.office)) s.add("office");
   if (ie(f.mls)) s.add("mlsAff");
@@ -434,7 +435,17 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   // "Match my filters" switch; each filter's own values are excluded server-side, so picking
   // one city never hides the others. Agent-grained modes only — Office/Brand run on a
   // different engine and keep their full lists.
-  const facets = { filters, source, enabled: mode === "agent" || mode === "mls" || mode === "location" };
+  // 0126: what actually gets SENT. The Office Agent Count filter is Agent-view only, but
+  // fn_agent_where (search), fn_facet_options (typeahead) and fn_mls_in_set (export dialog) have
+  // no idea which view they serve — sent from Location/MLS it would silently shrink them (cities
+  // 18,118 -> 12,204 in testing) with no chip showing why. So it is kept in state across view
+  // switches (it reappears in Agent view) but stripped from every outgoing request elsewhere.
+  // Saved views and the All-filters drawer keep the full state on purpose.
+  const queryFilters = useMemo(
+    () => (mode === "agent" ? filters : { ...filters, officeAgentCount: DEFAULT_FILTERS.officeAgentCount }),
+    [filters, mode]
+  );
+  const facets = { filters: queryFilters, source, enabled: mode === "agent" || mode === "mls" || mode === "location" };
 
   // (nameQuery is a find/highlight tool, not a filter, so it does not count here.)
   const filterCount = activeFilterCount(filters, mode);
@@ -460,7 +471,15 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   // A13: clicking an office/brand name in Office view jumps to the agent Filter view with
   // that office (or brand) applied as an Include filter — replaces the agent-list pop-up.
   function jumpToAgents(kind: "office" | "brand", name: string) {
-    setFilters((f) => ({ ...f, officeSearch: { ...f.officeSearch, [kind]: { include: [name], exclude: [] } } }));
+    // 0126: from Office/Brand view, drop any Office Agent Count left over (hidden) in state — it
+    // would otherwise filter the very office just clicked (a leftover "1-5" turns a 50-agent
+    // office into 0 agents). From the Agent grid itself the filter is visible and the clicked
+    // office already satisfies it, so it stays.
+    setFilters((f) => ({
+      ...f,
+      officeSearch: { ...f.officeSearch, [kind]: { include: [name], exclude: [] } },
+      officeAgentCount: mode === "agent" ? f.officeAgentCount : DEFAULT_FILTERS.officeAgentCount,
+    }));
     setMode("agent");
     setPage(1);
     setSelected(new Set());
@@ -473,6 +492,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   function jumpToLocation(label: string) {
     setFilters((f) => ({
       ...f,
+      // 0126: the row was counted without the (hidden) Office Agent Count — keep the grid matching
+      officeAgentCount: DEFAULT_FILTERS.officeAgentCount,
       location: {
         field: locGran,
         appliesTo: [...locKinds],
@@ -490,7 +511,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
 
   // B8: clicking an MLS row jumps to the agent grid filtered to that MLS.
   function jumpToMls(mlsId: string) {
-    setFilters((f) => ({ ...f, mls: { include: [mlsId], exclude: [] } }));
+    // 0126: the MLS row was counted without the (hidden) Office Agent Count — keep the grid matching
+    setFilters((f) => ({ ...f, mls: { include: [mlsId], exclude: [] }, officeAgentCount: DEFAULT_FILTERS.officeAgentCount }));
     setMode("agent");
     setPage(1);
     setSelected(new Set());
@@ -560,9 +582,9 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
       pageSize,
       // B5: single-office "brands" are just the brokerage's own name — hidden by default
       filters:
-        mode === "brand" && showAllBrands ? { ...filters, includeSingleOfficeBrands: "true" }
-        : mode === "location" ? { ...filters, locGranularity: locGran, locKinds }
-        : filters,
+        mode === "brand" && showAllBrands ? { ...queryFilters, includeSingleOfficeBrands: "true" }
+        : mode === "location" ? { ...queryFilters, locGranularity: locGran, locKinds }
+        : queryFilters,
     });
 
     try {
@@ -597,7 +619,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [mode, source, sortBy, sortDir, page, pageSize, filters, showAllBrands, locGran, locKinds]);
+  }, [mode, source, sortBy, sortDir, page, pageSize, queryFilters, showAllBrands, locGran, locKinds]);
 
   useEffect(() => {
     fetchData();
@@ -716,6 +738,16 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} facets={facets} />
           {mode === "agent" && (
             <>
+              {/* 0126: agents whose OFFICE has this many agents — the same number as the Office
+                  view's Agents column. Its own key: "Agent Count" in the other views is the
+                  office / brand / place total of the row itself. */}
+              <RangePopover
+                label="Office Agent Count"
+                suffix="#"
+                buckets={COUNT_BUCKETS}
+                value={{ side: "all", ...filters.officeAgentCount }}
+                onChange={(v) => setF("officeAgentCount", { buckets: v.buckets, min: v.min, max: v.max })}
+              />
               <MlsPopover
                 value={filters.mls}
                 multiMls={filters.multiMls}
@@ -1038,7 +1070,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
       </div>
 
       <AgentProfileDialog agentId={profileId} onClose={() => setProfileId(null)} />
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} filters={filters} total={total} selectedIds={Array.from(selected)} source={source} mode={mode} />
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} filters={queryFilters} total={total} selectedIds={Array.from(selected)} source={source} mode={mode} />
       <EditColumnsModal
         open={editOpen}
         onOpenChange={setEditOpen}

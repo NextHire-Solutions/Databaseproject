@@ -158,6 +158,14 @@ export function BucketPills({ buckets, selected, onToggle }: { buckets: Bucket[]
 // separators (3,000,000) while storing "3000000" so the RPC still gets a plain number.
 const withCommas = (v: string) => (v === "" ? "" : Number(v).toLocaleString("en-US"));
 const stripCommas = (v: string) => v.replace(/[^0-9]/g, "");
+// Year boxes (x12 to months server-side) legitimately take fractions: 0.5 yr = 6 months. Keep one
+// decimal point (extra points from a paste are dropped) and turn a bare leading "." into "0." —
+// "."::numeric is invalid, "0."::numeric is 0 — so a half-typed value can never fail the cast.
+const decimalOnly = (v: string) => {
+  const [int, ...frac] = v.replace(/[^0-9.]/g, "").split(".");
+  const s = frac.length ? `${int}.${frac.join("")}` : int;
+  return s.startsWith(".") ? `0${s}` : s;
+};
 
 export function MinMax({
   min,
@@ -167,6 +175,7 @@ export function MinMax({
   prefix,
   suffix,
   commas = false,
+  decimals = false,
   disabled = false,
 }: {
   min: string;
@@ -176,6 +185,7 @@ export function MinMax({
   prefix?: string;
   suffix?: string;
   commas?: boolean;
+  decimals?: boolean; // year boxes: allow one decimal point
   disabled?: boolean;
 }) {
   const field = (val: string, set: (v: string) => void, ph: string) => (
@@ -183,8 +193,11 @@ export function MinMax({
       {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">{prefix}</span>}
       <input
         value={commas ? withCommas(val) : val}
-        onChange={(e) => set(commas ? stripCommas(e.target.value) : e.target.value)}
-        inputMode="numeric"
+        // Digits only for EVERY box, not just $ ones: a raw "1,000" or "5 yrs" reached the
+        // database as-is, the numeric cast failed, and the search silently kept stale rows.
+        // `commas` now only controls how the value is displayed.
+        onChange={(e) => set(decimals ? decimalOnly(e.target.value) : stripCommas(e.target.value))}
+        inputMode={decimals ? "decimal" : "numeric"}
         placeholder={ph}
         disabled={disabled}
         className={cn(
@@ -282,7 +295,7 @@ export function RangePopover({
       <div className={cn(disablePills && "pointer-events-none opacity-40")}>
         <BucketPills buckets={buckets} selected={sel} onToggle={toggle} />
       </div>
-      <MinMax min={min} max={max} setMin={setMin} setMax={setMax} prefix={prefix} suffix={suffix} commas={prefix === "$"} disabled={disableCustom} />
+      <MinMax min={min} max={max} setMin={setMin} setMax={setMax} prefix={prefix} suffix={suffix} commas={prefix === "$"} decimals={suffix === "yrs"} disabled={disableCustom} />
       {hasBuckets && hasCustom ? (
         <p className="mt-2 text-xs text-amber-600">Using both a preset and a custom range — clear one.</p>
       ) : disableCustom ? (
@@ -325,7 +338,7 @@ export function ZillowRealtorPopover({ value, onChange }: { value: ZillowRealtor
             {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">{prefix}</span>}
             <input
               value={prefix === "$" ? withCommas(draft[key][k]) : draft[key][k]}
-              onChange={(e) => setDraft({ ...draft, [key]: { ...draft[key], [k]: prefix === "$" ? stripCommas(e.target.value) : e.target.value } })}
+              onChange={(e) => setDraft({ ...draft, [key]: { ...draft[key], [k]: stripCommas(e.target.value) } })}
               inputMode="numeric"
               placeholder={k === "min" ? "Min" : "Max"}
               className={cn("h-9 w-full rounded-lg border border-neutral-300 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none", prefix ? "pl-7 pr-3" : "px-3")}
